@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+node_modules/
+dist/
+playwright-report/
+test-results/
+
+.DS_Store
+*.log
+.env
+
+# This environment injects an empty, read-only .git mount. Local repository
+# metadata is kept here until a normal checkout can use .git again.
+/.git-local/
+
+# Browser captures generated during local review; curated images live in docs/screenshots.
+/tmp/

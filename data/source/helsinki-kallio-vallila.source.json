@@ -1,0 +1,6 @@
+{
+  "acquired_at": "2026-08-25T23:01:58Z",
+  "overpass_endpoint": "https://overpass-api.de/api/interpreter",
+  "query": "[out:json][timeout:90];(way[\"highway\"](60.1854,24.9435,60.1962,24.9635);way[\"building\"](60.1854,24.9435,60.1962,24.9635);way[\"railway\"~\"^(tram|light_rail)$\"](60.1854,24.9435,60.1962,24.9635););out meta;>;out meta qt;",
+  "raw_sha256": "d8c48f77151b152f21045f742f890f50b8600da4bde8e926aa6185197b37bfa0"
+}
