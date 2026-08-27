@@ -11,6 +11,7 @@ export function Legend() {
         <span><i className="legend-filter selected" />Selected filter</span>
         <span><i className="legend-line counterexample" />Surviving route</span>
         <span><i className="legend-dot access" />Address access</span>
+        <span><i className="legend-line component" />Mutual car-reachability region</span>
       </div>
     </details>
   )

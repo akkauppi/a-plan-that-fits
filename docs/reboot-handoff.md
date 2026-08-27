@@ -1,95 +1,153 @@
-# Reboot handoff — 2026-08-26
+# Release handoff — 2026-08-26
 
-## State at freeze
+This file began as the reboot note and now records the reproducible release state.
+The frozen source snapshot is unchanged; the portal model, access objective,
+independent verifier, timeout controls, and release interface have been corrected
+since the initial checkpoint.
 
-The browser, data pipeline, solver service, streaming API, tests, and documentation
-are present. All local Vite, Uvicorn, browser-capture, and agent processes were stopped
-before this handoff.
+## What is implemented
 
-The last design iteration reduced 40 visually cluttered boundary portals to eight
-real analytical crossing groups (two contiguous groups on each side). Every retained
-group contains all detected non-service car crossing nodes in its sector; the marker
-is placed on the member crossing nearest the group centroid. This semantics is encoded
-in the frozen metadata.
+- A React/MapLibre browser instrument with real frozen Helsinki streets, buildings,
+  protected features, boundary portals, address clusters, oriented candidate filters,
+  live counterexample routes, local-access inspection, and before/after connectivity.
+- A FastAPI SSE service using Z3 for intervention choices and NetworkX for fresh-graph
+  final verification.
+- Budget, portal-pair, force-filter, lock-open, objective-mode, emergency-assumption,
+  cancellation, reset, equal-objective alternative, comparison, and shareable URL
+  controls.
+- Adjustable browser deadlines of 5, 10, 30, 60, and 120 seconds, with 30 seconds as
+  the default. Timeout is an indeterminate terminal state and is never reported as
+  UNSAT.
+- Distinct verified-optimal, verified-UNSAT, timeout, cancelled, unblockable-route,
+  and data/verification-error outcomes.
 
-## Checks completed immediately before freeze
+The default budget-four, two-pair Helsinki request has a verified optimum using three
+filters. A result reaches a verified label only after a fresh NetworkX graph confirms
+the requested private-car disconnections and local address-cluster egress.
 
-Passing:
+## Frozen scenario and portal semantics
+
+The study bbox is `[24.9435, 60.1854, 24.9635, 60.1962]`, about 1.33 km² across
+Kallio, Alppiharju, and western Vallila. The OpenStreetMap base timestamp is
+`2026-08-25T22:24:24Z`; the frozen snapshot ID is
+`osm-20260825T222424Z-d8c48f77151b`.
+
+The derived dataset contains:
 
 ```text
-17/17 synthetic engine and API tests
-8/8 frontend unit tests
-TypeScript strict typecheck
-Frontend ESLint
-Python module compilation
-Frozen scenario --validate-only
+1,342 analytical nodes
+2,408 directed private-car edges
+384 eligible modal-filter candidates
+68 retained boundary-crossing records
+38 analytical portal clusters / 8 browser primary portals
+182 address clusters / 631 building footprints
+678 protected display features
 ```
 
-Known failing integration check:
+Portal clustering is deterministic contiguous complete-link grouping within each
+boundary side, with a hard 60 m maximum diameter. Every crossing belongs to exactly
+one cluster and keeps its OSM way/node, road-class, direction, point, and cluster
+provenance. The browser exposes two named, spatially distributed primary clusters per
+side. A selected pair quantifies over every member node in both clusters, while local
+access may terminate at any of the 38 analytical portals.
+
+## Objectives and connectivity semantics
+
+The objectives are lexicographic and returned explicitly:
+
+- balanced: intervention count, weighted cost, baseline-egress exposure, adjacency;
+- access: intervention count, baseline-egress exposure, weighted cost, adjacency;
+- fewest: intervention count only.
+
+Baseline-egress exposure counts address clusters whose one deterministic baseline
+directed shortest route to a permitted portal uses a candidate. A cluster already at
+a portal has zero-length egress and contributes no exposure. The additive value is a
+search proxy—not predicted traffic and not exact detour. The verifier separately
+recomputes actual post-solution shortest-egress distance changes.
+
+Before/after regions are directed strongly connected components: each region is a
+maximal node set with mutual private-car reachability while respecting one-way
+streets. They are a topology view, not traffic volumes or displacement estimates.
+
+## Proof and data boundaries
+
+The frozen graph is derived directly from a committed, bounded Overpass response by
+the custom deterministic topology pipeline in `scripts/build_scenario.py`. It
+preserves parallel ways and one-way directions, but it is not an OSMnx-produced set
+of drive, walking, cycling, and emergency graphs.
+
+Walking and cycling passability are mode-permission semantics: a selected private-car
+filter does not remove their access. Emergency passage is an explicit assumption for
+a removable, gated, or otherwise permeable treatment. Those modes are not separately
+routed or independently proved here. Service access is unsupported and requests that
+enable it are rejected with HTTP 422. Protected tram/public-transport geometry is a
+conservative OSM-tag abstraction, not a complete operations model.
+
+## Recorded evidence
+
+The final 2026-08-27 release checks recorded:
 
 ```text
-services/solver/tests/test_helsinki_scenario.py
-expected: verified_optimal
-actual:   timeout
-timeout:  20 seconds per repeated deterministic solve
+scenario preprocessing validation: passed
+portal/access provenance validation: passed
+Python solver/API/invariant suite: 29 tests passed in 19.31 seconds
+frontend unit regression: 22 tests passed
+TypeScript strict typecheck: passed
+frontend ESLint: passed
+Python Ruff: passed
+production Vite build: passed with large-chunk advisory
+Playwright desktop/tablet main story: 8 tests passed in 2.2 minutes
+desktop 1440 × 900 browser audit: no material console/layout/a11y errors
+tablet 820 × 1180 browser audit: no material console/layout/a11y errors
 ```
-
-The test command spent about 40 seconds on its two runs and failed the first result
-assertion. Earlier two-second results were against the old single-crossing portal
-semantics and must not be quoted as evidence for the current eight-group dataset.
-
-## Work in progress at interruption
-
-`FourPlantersSolver._counterexample_batch` now batches multiple portal-node routes per
-candidate and reports `routes_added`, but that first batching attempt is not yet enough
-to prove the grouped default within the interactive timeout. The source compiles and
-all synthetic tests pass, so it is a safe restart point rather than an unresolved
-merge conflict.
-
-Highest-value next action:
-
-1. Profile one current default solve and inspect batch size/duplicate path clauses.
-2. Generate a stronger deterministic set of distinct candidate-path clauses per pair
-   and direction (or seed them with a candidate-capacitated cut/path routine).
-3. Preserve the honest grouped-portal quantification; do not silently revert the UI
-   to representative-node-only proof semantics.
-4. Target a verified result below 10 seconds, preferably below five.
-5. Re-run the Helsinki determinism test, the entire Python suite, production build,
-   and Playwright desktop/tablet story.
-6. Capture final before, verified, alternative, and UNSAT screenshots under
-   `docs/screenshots/`; replace the current review-only timeout image.
-
-## Restart commands
 
 ```bash
-make setup
 make data-validate
-.venv/bin/pytest services/solver/tests/test_engine.py services/solver/tests/test_api.py
-npm --prefix apps/web run test
-make dev
-```
-
-After solver work:
-
-```bash
-.venv/bin/pytest services/solver/tests/test_helsinki_scenario.py -vv
+make lint
 make test
 make build
 make test-e2e
 ```
 
+Vite's passing production build currently emits one large JavaScript-chunk advisory
+(approximately 1.33 MB before gzip and 368 kB after gzip). This is a known startup
+performance limitation; code-splitting MapLibre and secondary panels is the most
+direct remedy.
+
+## Run locally
+
+```bash
+make setup
+make data-validate
+make dev
+```
+
+Open <http://127.0.0.1:5173>. The API listens on
+<http://127.0.0.1:8000>. Ordinary startup and `make data` use the committed archive
+without contacting OSM. Only the explicit `make data-refresh` command calls Overpass
+and replaces the source snapshot.
+
+## Release screenshots
+
+The passing Playwright run wrote all eight committed captures below:
+
+| State | Desktop | Tablet |
+| --- | --- | --- |
+| Before | [desktop](screenshots/four-planters-before-desktop.png) | [tablet](screenshots/four-planters-before-tablet.png) |
+| Verified | [desktop](screenshots/four-planters-verified-desktop.png) | [tablet](screenshots/four-planters-verified-tablet.png) |
+| Compare | [desktop](screenshots/four-planters-compare-desktop.png) | [tablet](screenshots/four-planters-compare-tablet.png) |
+| UNSAT | [desktop](screenshots/four-planters-unsat-desktop.png) | [tablet](screenshots/four-planters-unsat-tablet.png) |
+
 ## Git metadata in this environment
 
 The execution environment injects `/home/antti/zroad/.git` as an empty read-only
-mount. `git init` therefore fails with `Read-only file system`. The checkpoint commit
-uses `/home/antti/zroad/.git-local` as its Git directory and the workspace as its work
-tree. Until the environment supplies a normal writable `.git`, use:
+mount. The repository therefore uses `/home/antti/zroad/.git-local` as its Git
+directory and the workspace as its work tree:
 
 ```bash
 git --git-dir=.git-local --work-tree=. status
 git --git-dir=.git-local --work-tree=. log --oneline -1
 ```
 
-After reboot, if the injected empty `.git` mount is gone, a normal repository can be
-created and the working tree recommitted with `git init`, or the local metadata can be
-moved into place before using ordinary Git commands.
+If the injected mount disappears, initialize a normal writable `.git` directory or
+move the local metadata into place before switching to ordinary Git commands.

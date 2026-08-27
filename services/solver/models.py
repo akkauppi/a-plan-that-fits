@@ -22,7 +22,13 @@ class SolveRequest(BaseModel):
     forced_interventions: list[str] = Field(default_factory=list)
     locked_open_streets: list[str] = Field(default_factory=list)
     emergency_permeable: bool = True
-    service_access_enabled: bool = False
+    service_access_enabled: bool = Field(
+        default=False,
+        description=(
+            "Reserved for a future service-access graph. The current solver rejects true "
+            "instead of claiming a mode guarantee it does not verify."
+        ),
+    )
     objective_mode: Literal["balanced", "fewest", "access", "minimum_filters"] = "balanced"
     timeout_seconds: float = Field(default=10.0, ge=0.01, le=120.0)
     solve_id: str | None = None
@@ -45,12 +51,19 @@ class SolveRequest(BaseModel):
     def unique_ids(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(value))
 
+    @field_validator("service_access_enabled")
+    @classmethod
+    def reject_unsupported_service_access(cls, value: bool) -> bool:
+        if value:
+            raise ValueError(
+                "Service-access preservation is not implemented or verified; "
+                "set service_access_enabled to false."
+            )
+        return value
 
-class NextSolutionRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
 
+class NextSolutionRequest(SolveRequest):
     solve_id: str
-    timeout_seconds: float | None = Field(default=None, ge=0.01, le=120.0)
 
 
 class CancelRequest(BaseModel):

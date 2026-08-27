@@ -25,10 +25,25 @@ Accepts:
   "forced_interventions": [],
   "locked_open_streets": [],
   "emergency_permeable": true,
+  "service_access_enabled": false,
   "objective_mode": "balanced",
-  "timeout_seconds": 10
+  "timeout_seconds": 30
 }
 ```
+
+`timeout_seconds` is the total per-run solver deadline. The browser presents the
+review-friendly presets 5, 10, 30, 60, and 120 seconds, defaults to 30 seconds, and
+serializes a non-default selection as `timeout=` in the shareable URL. The API schema
+accepts values from 0.01 through 120 seconds for diagnostic clients. Expiry produces
+a terminal `timeout` result with an indeterminate explanation; it is never translated
+to `verified_unsat`. For backward compatibility, an API caller that omits the field
+receives the service default of 10 seconds; the browser always sends its explicit
+selection.
+
+`service_access_enabled` is reserved for a future separately modelled service-access
+graph. The current API accepts only `false`; requesting `true` returns HTTP 422 with
+an explicit `service_access_enabled` validation error. This prevents an unsupported
+mode assumption from appearing in a verified result.
 
 The response is `text/event-stream`. Each `solve_event` data object has a `type`
 and monotonically increasing sequence number. Progress types include `started`,
@@ -42,8 +57,30 @@ and monotonically increasing sequence number. Progress types include `started`,
 - `data_error`
 
 The stream ends with `complete`, whose `result` includes selected candidate IDs,
-the explicit objective vector, verification summaries for portal pairs and local
-access, timing, iteration count, a human explanation, and the snapshot ID.
+the explicit objective vector, verification summaries for private-car portal pairs
+and local private-car access, timing, iteration count, a human explanation, and the
+snapshot ID. Walking and cycling are not separate verification graphs in this frozen
+scenario: the intervention semantics simply do not apply private-car edge removals to
+those modes. Emergency passage is likewise an explicit removable/unlockable-filter
+assumption, not a computed route guarantee.
+`objective_values.access_penalty` is the additive baseline-egress exposure proxy
+documented in the frozen scenario metadata; it is not a distance. Exact post-solution
+egress changes are returned separately in `local_detour_metrics` in metres.
+Objective order is lexicographic rather than a hidden aggregate score:
+
+- `balanced`: intervention count, weighted cost, access exposure, adjacency penalty;
+- `access`: intervention count, access exposure, weighted cost, adjacency penalty;
+- `fewest`: intervention count only.
+
+The adjacency term discourages spatially concentrated filters. It is a layout proxy,
+not an operational feasibility judgement.
+
+A verified result also returns `baseline_components` and `filtered_components` as
+GeoJSON line feature collections. Their metric is stated explicitly in
+`private_car_connectivity.metric` as `directed_strongly_connected_components`, with
+before/after component counts and related node summaries. Each component represents
+mutual reachability while respecting one-way streets; it is not a traffic forecast.
+`components` remains a compatibility alias for `filtered_components`.
 
 ## `POST /api/solutions/next`
 
@@ -54,7 +91,8 @@ solution when one exists.
 ## `POST /api/solve/cancel`
 
 Accepts `{ "solve_id": "…" }`. Cancellation is cooperative and is reported as
-`cancelled`, never as `verified_unsat`.
+`cancelled`, never as `verified_unsat`. A per-run cancellation event interrupts an
+active Z3 check and is also observed at deterministic graph-analysis boundaries.
 
 ## `POST /api/solve/json`
 

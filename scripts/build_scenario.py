@@ -50,6 +50,15 @@ CENTER = ((BBOX[0] + BBOX[2]) / 2, (BBOX[1] + BBOX[3]) / 2)
 ANALYSIS_CRS = "EPSG:3067"  # ETRS89 / TM35FIN, metres
 DISPLAY_CRS = "EPSG:4326"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+PORTAL_CLUSTER_MAX_DIAMETER_M = 60.0
+PRIMARY_PORTALS_PER_SIDE = 2
+ACCESS_PENALTY_METRIC = "baseline_shortest_egress_route_cluster_count"
+ACCESS_PENALTY_DEFINITION = (
+    "Count of address clusters whose deterministic baseline directed shortest route from the "
+    "cluster's snapped graph node to any permitted boundary portal traverses this candidate. "
+    "Equal-distance routes are resolved lexicographically by stable edge-ID sequence; a cluster "
+    "already snapped to a permitted portal has zero-length egress and contributes no exposure."
+)
 
 CAR_HIGHWAYS = {
     "motorway",
@@ -637,18 +646,30 @@ def cluster_portals(
     crossing_records: Sequence[dict[str, Any]],
     project: Projection,
     physical_edges: Sequence[dict[str, Any]],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Create physically local portal clusters and retain every crossing record.
+
+    Portal semantics are analytical, so visual marker count must not determine
+    membership.  Crossings are first separated by boundary side and then put in
+    deterministic contiguous complete-link clusters: a new crossing may join a
+    cluster only when it lies within ``PORTAL_CLUSTER_MAX_DIAMETER_M`` of every
+    existing member.  This prevents the former half-side sectors from silently
+    treating streets hundreds of metres apart as one portal.
+    """
     boundary_xy = transform_geometry(box(*BBOX), project.forward)
     by_side: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for record in crossing_records:
-        if record["highway"] == "service" and record["name"] == "Unnamed street":
-            continue
+    for record in sorted(
+        crossing_records,
+        key=lambda item: (item["way_id"], item["node_id"], tuple(item["point"])),
+    ):
         x, y = project.point_xy(record["point"])
         enriched = {**record, "point_xy": Point(x, y)}
         enriched["side"] = boundary_side(enriched["point_xy"], boundary_xy)
+        enriched["crossing_id"] = f"x-{record['way_id']}-{record['node_id']}"
         by_side[enriched["side"]].append(enriched)
 
     clusters: list[dict[str, Any]] = []
+    crossing_exports: list[dict[str, Any]] = []
     for side in ("north", "east", "south", "west"):
         records = by_side[side]
         records.sort(
@@ -658,30 +679,15 @@ def cluster_portals(
                 item["node_id"],
             )
         )
-        # Portals are analytical boundary-crossing groups, not individual map
-        # markers. Two contiguous sectors per side retain every crossing node
-        # while keeping the interaction legible at neighbourhood scale. Choose
-        # the strongest spatial break near the middle rather than an arbitrary
-        # fixed-distance chain that can create dozens of near-overlapping dots.
-        side_clusters: list[list[dict[str, Any]]]
-        if len(records) <= 1:
-            side_clusters = [records] if records else []
-        else:
-            axis = "x" if side in {"north", "south"} else "y"
-            lower = max(1, len(records) // 4)
-            upper = min(len(records) - 1, math.ceil(3 * len(records) / 4))
-            split_index = max(
-                range(lower, upper + 1),
-                key=lambda index: (
-                    abs(
-                        getattr(records[index]["point_xy"], axis)
-                        - getattr(records[index - 1]["point_xy"], axis)
-                    ),
-                    -abs(index - len(records) / 2),
-                    -index,
-                ),
-            )
-            side_clusters = [records[:split_index], records[split_index:]]
+        side_clusters: list[list[dict[str, Any]]] = []
+        for record in records:
+            if not side_clusters or any(
+                record["point_xy"].distance(member["point_xy"]) > PORTAL_CLUSTER_MAX_DIAMETER_M
+                for member in side_clusters[-1]
+            ):
+                side_clusters.append([record])
+            else:
+                side_clusters[-1].append(record)
         for index, members in enumerate(side_clusters, start=1):
             x = sum(item["point_xy"].x for item in members) / len(members)
             y = sum(item["point_xy"].y for item in members) / len(members)
@@ -691,29 +697,59 @@ def cluster_portals(
             )
             names = sorted({item["name"] for item in members})
             primary_name = representative["name"]
-            sector = {
-                ("north", 1): "North-west",
-                ("north", 2): "North-east",
-                ("south", 1): "South-west",
-                ("south", 2): "South-east",
-                ("east", 1): "East-south",
-                ("east", 2): "East-north",
-                ("west", 1): "West-south",
-                ("west", 2): "West-north",
-            }.get((side, index), side.title())
+            portal_id = f"p-{side}-{index:02d}"
+            maximum_diameter = max(
+                (
+                    first["point_xy"].distance(second["point_xy"])
+                    for member_index, first in enumerate(members)
+                    for second in members[member_index + 1 :]
+                ),
+                default=0.0,
+            )
+            member_crossings: list[dict[str, Any]] = []
+            for item in sorted(members, key=lambda value: value["crossing_id"]):
+                exported = {
+                    "id": item["crossing_id"],
+                    "portal_id": portal_id,
+                    "side": side,
+                    "node_id": f"n{item['node_id']}",
+                    "osm_node_id": item["node_id"],
+                    "osm_way_id": item["way_id"],
+                    "point": list(item["point"]),
+                    "street_name": item["name"],
+                    "highway": item["highway"],
+                    "travel_direction": item["direction"],
+                    "inside_after": item["inside_after"],
+                }
+                member_crossings.append(exported)
+                crossing_exports.append(exported)
             clusters.append(
                 {
-                    "id": f"p-{side}-{index:02d}",
-                    "label": f"{sector} · {primary_name}",
+                    "id": portal_id,
+                    "label": f"{side.title()} boundary · {primary_name}",
                     "direction": side,
                     "side": side,
                     "node_ids": sorted({f"n{item['node_id']}" for item in members}),
                     "display_point": list(representative["point"]),
                     "point": list(representative["point"]),
                     "group_centroid": project.point_lonlat((x, y)),
-                    "crossing_count": len({item["node_id"] for item in members}),
+                    "crossing_count": len(member_crossings),
+                    "crossing_ids": [item["id"] for item in member_crossings],
+                    "member_crossings": member_crossings,
                     "street_names": names,
+                    "local_street_names": sorted(
+                        {
+                            item["name"]
+                            for item in members
+                            if item["highway"] in CANDIDATE_HIGHWAYS
+                            and item["name"] != "Unnamed street"
+                        }
+                    ),
+                    "highways": sorted({item["highway"] for item in members}),
                     "crossing_way_ids": sorted({item["way_id"] for item in members}),
+                    "maximum_diameter_m": round(maximum_diameter, 1),
+                    "primary": False,
+                    "selectable": False,
                 }
             )
 
@@ -729,7 +765,88 @@ def cluster_portals(
             {edge["candidate_id"] for edge in adjacent if edge.get("candidate_id")}
         )
         portal["adjacent_protected"] = any(edge["protected"] for edge in adjacent)
-    return sorted(clusters, key=lambda item: (item["direction"], item["id"]))
+    return (
+        sorted(clusters, key=lambda item: (item["direction"], item["id"])),
+        sorted(crossing_exports, key=lambda item: item["id"]),
+    )
+
+
+def select_primary_portals(
+    portals: list[dict[str, Any]], project: Projection
+) -> list[dict[str, Any]]:
+    """Mark two spatially distributed, inspectable portal clusters per side."""
+
+    primary: list[dict[str, Any]] = []
+    for side in ("north", "east", "south", "west"):
+        axis = 0 if side in {"north", "south"} else 1
+        side_portals = sorted(
+            (portal for portal in portals if portal["side"] == side),
+            key=lambda portal: (project.point_xy(portal["group_centroid"])[axis], portal["id"]),
+        )
+        if len(side_portals) < PRIMARY_PORTALS_PER_SIDE:
+            raise ValueError(f"Boundary side {side} has fewer than two analytical portals")
+        positions = [project.point_xy(portal["group_centroid"])[axis] for portal in side_portals]
+        midpoint = (positions[0] + positions[-1]) / 2
+        halves = [
+            [
+                portal
+                for portal in side_portals
+                if project.point_xy(portal["group_centroid"])[axis] <= midpoint
+            ],
+            [
+                portal
+                for portal in side_portals
+                if project.point_xy(portal["group_centroid"])[axis] > midpoint
+            ],
+        ]
+        if not all(halves):
+            split = len(side_portals) // 2
+            halves = [side_portals[:split], side_portals[split:]]
+        targets = [
+            positions[0] + (positions[-1] - positions[0]) * 0.25,
+            positions[0] + (positions[-1] - positions[0]) * 0.75,
+        ]
+
+        def rank(portal: dict[str, Any], target: float, axis_index: int = axis) -> tuple[Any, ...]:
+            named_local = bool(portal.get("local_street_names"))
+            coordinate = project.point_xy(portal["group_centroid"])[axis_index]
+            return (
+                not named_local,
+                not bool(portal["adjacent_candidate_ids"]),
+                bool(portal["adjacent_protected"]),
+                abs(coordinate - target),
+                portal["maximum_diameter_m"],
+                portal["id"],
+            )
+
+        chosen = [
+            min(half, key=lambda portal, i=i: rank(portal, targets[i]))
+            for i, half in enumerate(halves)
+        ]
+        chosen.sort(key=lambda portal: project.point_xy(portal["group_centroid"])[axis])
+        for index, portal in enumerate(chosen, start=1):
+            sector = {
+                ("north", 1): "North-west",
+                ("north", 2): "North-east",
+                ("south", 1): "South-west",
+                ("south", 2): "South-east",
+                ("east", 1): "East-south",
+                ("east", 2): "East-north",
+                ("west", 1): "West-south",
+                ("west", 2): "West-north",
+            }[(side, index)]
+            portal["primary"] = True
+            portal["selectable"] = True
+            portal["primary_order"] = index
+            display_name = next(
+                iter(portal.get("local_street_names") or portal["street_names"]),
+                "Unnamed access",
+            )
+            portal["label"] = f"{sector} · {display_name}"
+            primary.append(portal)
+    if len(primary) != PRIMARY_PORTALS_PER_SIDE * 4:
+        raise ValueError("Primary portal selection did not produce exactly eight portals")
+    return sorted(primary, key=lambda item: (item["direction"], item["primary_order"], item["id"]))
 
 
 def building_features(
@@ -883,6 +1000,80 @@ def shortest_route(
     return None
 
 
+def assign_candidate_access_penalties(
+    candidates: list[dict[str, Any]],
+    clusters: list[dict[str, Any]],
+    portals: Sequence[dict[str, Any]],
+    nodes: Sequence[dict[str, Any]],
+    edges: Sequence[dict[str, Any]],
+) -> None:
+    """Attach a deterministic baseline-egress exposure proxy to each candidate.
+
+    This is deliberately not an estimate of post-filter detour.  For each address
+    cluster, one baseline shortest directed route to any permitted portal is chosen
+    using :func:`shortest_route`'s stable edge-ID tie-break.  Every candidate on that
+    route receives one unit of exposure.  The final solver result separately computes
+    actual shortest-path detours after applying the complete intervention set.
+    """
+
+    candidate_by_id = {candidate["id"]: candidate for candidate in candidates}
+    portal_by_id = {portal["id"]: portal for portal in portals}
+    cluster_usage: dict[str, list[str]] = {candidate_id: [] for candidate_id in candidate_by_id}
+
+    for cluster in sorted(clusters, key=lambda item: item["id"]):
+        target_nodes = sorted(
+            {
+                node_id
+                for portal_id in cluster["allowed_portal_ids"]
+                if portal_id in portal_by_id
+                for node_id in portal_by_id[portal_id]["node_ids"]
+            }
+        )
+        already_at_permitted_portal = cluster["node_id"] in target_nodes
+        if already_at_permitted_portal:
+            route = {
+                "length_m": 0.0,
+                "node_ids": [cluster["node_id"]],
+                "candidate_ids": [],
+            }
+        else:
+            route = shortest_route(nodes, edges, [cluster["node_id"]], target_nodes)
+            if route is None:
+                raise ValueError(
+                    f"Address cluster {cluster['id']} has no baseline route to a permitted portal"
+                )
+        route_candidate_ids = sorted(set(route["candidate_ids"]))
+        unknown = set(route_candidate_ids) - set(candidate_by_id)
+        if unknown:
+            raise ValueError(
+                f"Address cluster {cluster['id']} baseline route references unknown candidates "
+                f"{sorted(unknown)}"
+            )
+        terminal_node_id = route["node_ids"][-1]
+        reached_portal_ids = sorted(
+            portal_id
+            for portal_id in cluster["allowed_portal_ids"]
+            if portal_id in portal_by_id and terminal_node_id in portal_by_id[portal_id]["node_ids"]
+        )
+        cluster["baseline_egress"] = {
+            "length_m": route["length_m"],
+            "portal_id": reached_portal_ids[0] if reached_portal_ids else None,
+            "source_node_id": cluster["node_id"],
+            "terminal_node_id": terminal_node_id,
+            "candidate_ids": route_candidate_ids,
+            "metric": ACCESS_PENALTY_METRIC,
+            "already_at_permitted_portal": already_at_permitted_portal,
+        }
+        for candidate_id in route_candidate_ids:
+            cluster_usage[candidate_id].append(cluster["id"])
+
+    for candidate_id, candidate in sorted(candidate_by_id.items()):
+        affected_cluster_ids = sorted(cluster_usage[candidate_id])
+        candidate["access_penalty"] = len(affected_cluster_ids)
+        candidate["access_penalty_metric"] = ACCESS_PENALTY_METRIC
+        candidate["access_penalty_cluster_ids"] = affected_cluster_ids
+
+
 def default_portal_pairs(
     portals: Sequence[dict[str, Any]],
     nodes: Sequence[dict[str, Any]],
@@ -1026,6 +1217,9 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
     edge_ids = [edge["id"] for edge in solver["edges"]]
     candidate_ids = [candidate["id"] for candidate in solver["candidates"]]
     portal_ids = [portal["id"] for portal in solver["portals"]]
+    address_cluster_ids = [cluster["id"] for cluster in solver["address_clusters"]]
+    crossing_ids = [crossing["id"] for crossing in solver.get("boundary_crossings", [])]
+    primary_portal_ids = list(solver.get("primary_portal_ids", []))
     if len(node_ids) != len(set(node_ids)):
         errors.append("node IDs are not unique")
     if len(edge_ids) != len(set(edge_ids)):
@@ -1034,10 +1228,60 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
         errors.append("candidate IDs are not unique")
     if len(portal_ids) != len(set(portal_ids)):
         errors.append("portal IDs are not unique")
+    if len(address_cluster_ids) != len(set(address_cluster_ids)):
+        errors.append("address-cluster IDs are not unique")
+    if len(crossing_ids) != len(set(crossing_ids)):
+        errors.append("boundary-crossing IDs are not unique")
     nodes = set(node_ids)
     edges = {edge["id"]: edge for edge in solver["edges"]}
     candidates = {candidate["id"]: candidate for candidate in solver["candidates"]}
     portals = set(portal_ids)
+    portal_by_id = {portal["id"]: portal for portal in solver["portals"]}
+    address_clusters = set(address_cluster_ids)
+    crossings = set(crossing_ids)
+    expected_candidate_usage: dict[str, list[str]] = defaultdict(list)
+    for cluster in solver["address_clusters"]:
+        baseline = cluster.get("baseline_egress", {})
+        permitted_target_nodes = {
+            node_id
+            for portal_id in cluster.get("allowed_portal_ids", [])
+            if portal_id in portal_by_id
+            for node_id in portal_by_id[portal_id]["node_ids"]
+        }
+        expected_at_portal = cluster["node_id"] in permitted_target_nodes
+        if baseline.get("metric") != ACCESS_PENALTY_METRIC:
+            errors.append(f"address cluster {cluster['id']} has an invalid access proxy metric")
+        if baseline.get("source_node_id") != cluster["node_id"]:
+            errors.append(f"address cluster {cluster['id']} has an invalid egress source node")
+        if baseline.get("terminal_node_id") not in nodes:
+            errors.append(f"address cluster {cluster['id']} has an invalid egress terminal node")
+        if baseline.get("portal_id") not in cluster.get("allowed_portal_ids", []):
+            errors.append(f"address cluster {cluster['id']} has an invalid baseline egress portal")
+        elif (
+            baseline.get("terminal_node_id") not in portal_by_id[baseline["portal_id"]]["node_ids"]
+        ):
+            errors.append(f"address cluster {cluster['id']} egress terminal and portal disagree")
+        if float(baseline.get("length_m", -1)) < 0:
+            errors.append(f"address cluster {cluster['id']} has an invalid baseline egress length")
+        baseline_candidate_ids = list(baseline.get("candidate_ids", []))
+        if len(baseline_candidate_ids) != len(set(baseline_candidate_ids)):
+            errors.append(f"address cluster {cluster['id']} repeats a baseline route candidate")
+        if not set(baseline_candidate_ids).issubset(candidates):
+            errors.append(
+                f"address cluster {cluster['id']} has an unknown baseline route candidate"
+            )
+        if bool(baseline.get("already_at_permitted_portal")) != expected_at_portal:
+            errors.append(f"address cluster {cluster['id']} has an invalid portal-snap flag")
+        if expected_at_portal and (
+            float(baseline.get("length_m", -1)) != 0
+            or baseline.get("terminal_node_id") != cluster["node_id"]
+            or baseline_candidate_ids
+        ):
+            errors.append(
+                f"address cluster {cluster['id']} portal snap is not zero-length and exposure-free"
+            )
+        for candidate_id in baseline_candidate_ids:
+            expected_candidate_usage[candidate_id].append(cluster["id"])
     for edge in edges.values():
         if edge["u"] not in nodes or edge["v"] not in nodes:
             errors.append(f"edge {edge['id']} references a missing node")
@@ -1059,9 +1303,81 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
                 errors.append(f"candidate {candidate['id']} references protected edge {edge_id}")
         if not shape(candidate["cross_geometry"]).is_valid:
             errors.append(f"candidate {candidate['id']} has invalid cross geometry")
+        penalty_cluster_ids = list(candidate.get("access_penalty_cluster_ids", []))
+        if candidate.get("access_penalty_metric") != ACCESS_PENALTY_METRIC:
+            errors.append(f"candidate {candidate['id']} has an invalid access penalty metric")
+        if len(penalty_cluster_ids) != len(set(penalty_cluster_ids)):
+            errors.append(f"candidate {candidate['id']} repeats an access penalty cluster")
+        if not set(penalty_cluster_ids).issubset(address_clusters):
+            errors.append(f"candidate {candidate['id']} references an unknown penalty cluster")
+        if int(candidate.get("access_penalty", -1)) != len(penalty_cluster_ids):
+            errors.append(f"candidate {candidate['id']} access penalty count disagrees")
+        if penalty_cluster_ids != sorted(expected_candidate_usage[candidate["id"]]):
+            errors.append(f"candidate {candidate['id']} access penalty provenance disagrees")
     for portal in solver["portals"]:
         if not portal["node_ids"] or not set(portal["node_ids"]).issubset(nodes):
             errors.append(f"portal {portal['id']} has invalid nodes")
+        if float(portal.get("maximum_diameter_m", math.inf)) > PORTAL_CLUSTER_MAX_DIAMETER_M + 0.1:
+            errors.append(f"portal {portal['id']} exceeds the clustering diameter")
+        member_ids = list(portal.get("crossing_ids", []))
+        if len(member_ids) != len(set(member_ids)):
+            errors.append(f"portal {portal['id']} repeats a boundary crossing")
+        if not set(member_ids).issubset(crossings):
+            errors.append(f"portal {portal['id']} references a missing boundary crossing")
+    portal_crossing_ids = [
+        crossing_id for portal in solver["portals"] for crossing_id in portal["crossing_ids"]
+    ]
+    if len(portal_crossing_ids) != len(set(portal_crossing_ids)):
+        errors.append("a boundary crossing belongs to more than one analytical portal")
+    if set(portal_crossing_ids) != crossings:
+        errors.append("analytical portals do not cover every retained boundary crossing")
+    crossing_portal = {
+        crossing["id"]: crossing.get("portal_id") for crossing in solver["boundary_crossings"]
+    }
+    if any(portal_id not in portals for portal_id in crossing_portal.values()):
+        errors.append("a boundary crossing references a missing analytical portal")
+    if any(crossing["node_id"] not in nodes for crossing in solver["boundary_crossings"]):
+        errors.append("a boundary crossing references a missing graph node")
+    for portal in solver["portals"]:
+        if any(
+            crossing_portal.get(crossing_id) != portal["id"]
+            for crossing_id in portal["crossing_ids"]
+        ):
+            errors.append(f"portal {portal['id']} has inconsistent crossing provenance")
+        member_crossings = portal.get("member_crossings", [])
+        if {member["id"] for member in member_crossings} != set(portal["crossing_ids"]):
+            errors.append(f"portal {portal['id']} member-crossing IDs disagree")
+        if {member["node_id"] for member in member_crossings} != set(portal["node_ids"]):
+            errors.append(f"portal {portal['id']} member nodes disagree with portal nodes")
+        if any(
+            member
+            != next(
+                crossing
+                for crossing in solver["boundary_crossings"]
+                if crossing["id"] == member["id"]
+            )
+            for member in member_crossings
+        ):
+            errors.append(f"portal {portal['id']} member provenance differs from source export")
+    primary_by_side = {
+        side: [
+            portal
+            for portal in solver["portals"]
+            if portal["id"] in primary_portal_ids and portal["side"] == side
+        ]
+        for side in ("north", "east", "south", "west")
+    }
+    if len(primary_portal_ids) != PRIMARY_PORTALS_PER_SIDE * 4 or any(
+        len(values) != PRIMARY_PORTALS_PER_SIDE for values in primary_by_side.values()
+    ):
+        errors.append("primary portal selection must contain exactly two portals per side")
+    if len(primary_portal_ids) != len(set(primary_portal_ids)) or set(primary_portal_ids) != {
+        portal["id"] for portal in solver["portals"] if portal.get("primary")
+    }:
+        errors.append("primary portal IDs and portal flags disagree")
+    browser_portal_ids = [portal["id"] for portal in scenario.get("portals", [])]
+    if browser_portal_ids != primary_portal_ids:
+        errors.append("browser portal export does not exactly match primary portal IDs")
     for cluster in solver["address_clusters"]:
         if cluster["node_id"] not in nodes:
             errors.append(f"address cluster {cluster['id']} has invalid snap node")
@@ -1072,6 +1388,8 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
     for pair in solver["defaults"]["portal_pairs"]:
         if pair["a"] not in portals or pair["b"] not in portals:
             errors.append("default pair references missing portal")
+        if pair["a"] not in primary_portal_ids or pair["b"] not in primary_portal_ids:
+            errors.append("default pair references a non-primary portal")
         portal_a = next(item for item in solver["portals"] if item["id"] == pair["a"])
         portal_b = next(item for item in solver["portals"] if item["id"] == pair["b"])
         if not shortest_route(
@@ -1091,7 +1409,10 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             "unique stable identifiers",
             "all graph references resolve",
             "candidate edges are eligible and unprotected",
+            "candidate access penalties match deterministic baseline egress-route provenance",
             "portal and address-cluster graph references resolve",
+            "every retained boundary crossing belongs to exactly one diameter-bounded portal",
+            "browser export contains exactly two primary portals per boundary side",
             "all included address clusters have permitted portals",
             "default portal pairs have baseline directed routes",
             "all exported GeoJSON geometries are non-empty and valid",
@@ -1101,6 +1422,8 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             "directed_edges": len(solver["edges"]),
             "candidates": len(solver["candidates"]),
             "portals": len(solver["portals"]),
+            "primary_portals": len(primary_portal_ids),
+            "boundary_crossings": len(crossing_ids),
             "address_clusters": len(solver["address_clusters"]),
             "buildings": len(scenario["buildings"]["features"]),
             "protected_features": len(scenario["protected_corridors"]["features"]),
@@ -1115,10 +1438,18 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
     tram_xy_lines = [project.line_xy(list(line.coords)) for line in tram_wgs_lines]
     physical_edges, crossings = simplify_road_ways(ways, nodes, project, tram_xy_lines)
     solver_nodes, directed_edges, candidates = directed_graph_data(physical_edges, nodes, project)
-    portals = cluster_portals(crossings, project, physical_edges)
+    portals, boundary_crossings = cluster_portals(crossings, project, physical_edges)
+    primary_portals = select_primary_portals(portals, project)
     buildings_geojson, buildings = building_features(ways, nodes, project)
     clusters = address_clusters(buildings, solver_nodes, portals, project)
-    pairs = default_portal_pairs(portals, solver_nodes, directed_edges)
+    assign_candidate_access_penalties(
+        candidates,
+        clusters,
+        portals,
+        solver_nodes,
+        directed_edges,
+    )
+    pairs = default_portal_pairs(primary_portals, solver_nodes, directed_edges)
     portal_by_id = {portal["id"]: portal for portal in portals}
     initial_pair = pairs[0]
     initial_route = shortest_route(
@@ -1202,16 +1533,52 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
         "access_policy": {
             "building_cluster_grid_m": 85,
             "snap_method": "projected representative-point cluster centroid to nearest graph node",
-            "permitted_portals": "all mapped boundary portals",
+            "permitted_portals": (
+                "all mapped private-car boundary-crossing clusters, including analytical portals "
+                "not exposed in the compact browser selector"
+            ),
+            "optimization_proxy": {
+                "field": "candidate.access_penalty",
+                "metric": ACCESS_PENALTY_METRIC,
+                "unit": "address clusters",
+                "definition": ACCESS_PENALTY_DEFINITION,
+                "aggregation": (
+                    "The Z3 objective sums candidate values. A cluster can contribute to more "
+                    "than one selected candidate when its baseline route traverses more than one."
+                ),
+                "limitation": (
+                    "This marginal exposure proxy does not model alternate-route availability, "
+                    "predict traffic, or equal the detour caused by an intervention set."
+                ),
+            },
+            "post_solution_metrics": (
+                "After applying the complete intervention set, the graph verifier recomputes "
+                "directed shortest egress distance for every served cluster and reports actual "
+                "additional distance relative to the unfiltered graph."
+            ),
         },
         "portal_policy": {
             "semantics": (
-                "Each displayed portal is a contiguous boundary-crossing group. A portal-pair "
-                "requirement quantifies over every mapped private-car crossing node in both groups."
+                "Each portal is a physically local boundary-crossing cluster. A portal-pair "
+                "requirement quantifies over every mapped private-car crossing node in both "
+                "selected clusters."
             ),
-            "grouping": "two spatially contiguous sectors per boundary side",
+            "grouping": (
+                "deterministic contiguous complete-link clustering within each boundary side"
+            ),
+            "maximum_cluster_diameter_m": PORTAL_CLUSTER_MAX_DIAMETER_M,
             "display_point": "the member crossing nearest the group centroid",
-            "crossings_retained": "all detected non-service boundary crossing nodes",
+            "crossings_retained": (
+                "every detected private-car boundary crossing record in the retained graph; each "
+                "belongs to exactly one analytical portal cluster"
+            ),
+            "primary_portals": (
+                "two deterministic, spatially distributed portal clusters per side are exposed "
+                "in the browser; all clusters remain permitted local-access exits in the solver"
+            ),
+            "primary_portal_count": len(primary_portals),
+            "analytical_portal_count": len(portals),
+            "boundary_crossing_count": len(boundary_crossings),
         },
         "known_data_scope": [
             "Building ways are included; multipolygon building relations are not expanded.",
@@ -1231,6 +1598,8 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
         "edges": directed_edges,
         "candidates": candidates,
         "portals": portals,
+        "boundary_crossings": boundary_crossings,
+        "primary_portal_ids": [portal["id"] for portal in primary_portals],
         "address_clusters": clusters,
         "defaults": {
             "budget": 4,
@@ -1247,17 +1616,38 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
             "service": "not enabled by default",
         },
         "objective": {
+            "default_mode": "balanced",
             "priority": [
                 "intervention_count",
-                "weighted_intervention_cost",
-                "local_access_detour",
-                "significantly_affected_clusters",
-                "spacing",
+                "weighted_cost",
+                "access_penalty",
+                "adjacency_penalty",
             ],
+            "mode_priorities": {
+                "balanced": [
+                    "intervention_count",
+                    "weighted_cost",
+                    "access_penalty",
+                    "adjacency_penalty",
+                ],
+                "access": [
+                    "intervention_count",
+                    "access_penalty",
+                    "weighted_cost",
+                    "adjacency_penalty",
+                ],
+                "fewest": ["intervention_count"],
+            },
             "candidate_costs": {
                 "living_street": 90,
                 "residential": 100,
                 "unclassified": 115,
+            },
+            "access_penalty": {
+                "field": "access_penalty",
+                "metric": ACCESS_PENALTY_METRIC,
+                "definition": ACCESS_PENALTY_DEFINITION,
+                "is_exact_post_solution_detour": False,
             },
         },
     }
@@ -1309,7 +1699,7 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
         "streets": feature_collection(street_geojson),
         "buildings": feature_collection(buildings_geojson),
         "protected_corridors": feature_collection(protected_geojson),
-        "portals": portals,
+        "portals": primary_portals,
         "candidates": candidates,
         "address_clusters": clusters,
         "default_portal_pairs": pairs,

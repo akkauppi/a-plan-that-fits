@@ -3,9 +3,12 @@ import type { ScenarioSettings } from './types'
 const safeIds = (value: string | null): string[] =>
   value?.split(',').map(decodeURIComponent).filter(Boolean).slice(0, 100) ?? []
 
+const SUPPORTED_TIMEOUTS = new Set([5, 10, 30, 60, 120])
+
 export function settingsFromUrl(fallback: ScenarioSettings, search = window.location.search): ScenarioSettings {
   const params = new URLSearchParams(search)
   const rawBudget = params.has('budget') ? Number(params.get('budget')) : Number.NaN
+  const rawTimeout = params.has('timeout') ? Number(params.get('timeout')) : Number.NaN
   const mode = params.get('objective')
   return {
     budget: Number.isInteger(rawBudget) && rawBudget >= 0 && rawBudget <= 12 ? rawBudget : fallback.budget,
@@ -14,6 +17,9 @@ export function settingsFromUrl(fallback: ScenarioSettings, search = window.loca
     locked: params.has('open') ? safeIds(params.get('open')) : fallback.locked,
     emergencyPermeable: params.get('emergency') !== 'fixed',
     objectiveMode: mode === 'fewest' || mode === 'access' ? mode : fallback.objectiveMode,
+    timeoutSeconds: Number.isInteger(rawTimeout) && SUPPORTED_TIMEOUTS.has(rawTimeout)
+      ? rawTimeout
+      : fallback.timeoutSeconds,
   }
 }
 
@@ -25,6 +31,7 @@ export function settingsToSearch(settings: ScenarioSettings): string {
   if (settings.locked.length) params.set('open', settings.locked.map(encodeURIComponent).join(','))
   if (!settings.emergencyPermeable) params.set('emergency', 'fixed')
   if (settings.objectiveMode !== 'balanced') params.set('objective', settings.objectiveMode)
+  if (settings.timeoutSeconds !== 30) params.set('timeout', String(settings.timeoutSeconds))
   const query = params.toString()
   return query ? `?${query}` : ''
 }

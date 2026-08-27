@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { ArrowRight, Check, X } from 'lucide-react'
 import type { Alternative, Candidate } from '../types'
 
@@ -12,11 +13,22 @@ interface CompareDrawerProps {
 }
 
 export function CompareDrawer({ alternatives, candidates, activeId, compareId, onActivate, onCompare, onClose }: CompareDrawerProps) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    closeRef.current?.focus()
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
+
   return (
-    <aside className="compare-drawer" aria-labelledby="compare-title">
+    <aside className="compare-drawer" role="dialog" aria-modal="true" aria-labelledby="compare-title">
       <div className="compare-drawer__head">
         <div><span>Equal-objective alternatives</span><h2 id="compare-title">Compare structures</h2></div>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="Close comparison"><X size={18} /></button>
+        <button ref={closeRef} type="button" className="icon-button" onClick={onClose} aria-label="Close comparison"><X size={18} /></button>
       </div>
       <p>Orange is the active plan. Choose one alternative to overlay in teal; both share the same objective values.</p>
       <div className="alternative-list">

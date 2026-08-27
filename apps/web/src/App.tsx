@@ -41,6 +41,7 @@ import type {
   SolveStatus,
 } from './types'
 import { pairKey } from './types'
+import { statusFromResult } from './resultStatus'
 import { replaceSettingsUrl, settingsFromUrl } from './urlState'
 
 const DEFAULT_SETTINGS: ScenarioSettings = {
@@ -50,6 +51,7 @@ const DEFAULT_SETTINGS: ScenarioSettings = {
   locked: [],
   emergencyPermeable: true,
   objectiveMode: 'balanced',
+  timeoutSeconds: 30,
 }
 
 const ACTIVE_STATUSES: SolveStatus[] = ['solving', 'candidate_found', 'counterexample_found', 'refining']
@@ -66,6 +68,7 @@ export function App() {
   const [counterexample, setCounterexample] = useState<Feature<LineString> | LineString | number[][]>()
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate>()
   const [alternatives, setAlternatives] = useState<Alternative[]>([])
+  const [nextPending, setNextPending] = useState(false)
   const [activeAlternativeId, setActiveAlternativeId] = useState('')
   const [comparisonId, setComparisonId] = useState<string>()
   const [viewMode, setViewMode] = useState<'before' | 'after'>('before')
@@ -74,7 +77,6 @@ export function App() {
   const [showCompare, setShowCompare] = useState(false)
   const [shareNotice, setShareNotice] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [timeoutSeconds, setTimeoutSeconds] = useState(30)
   const abortRef = useRef<AbortController | undefined>(undefined)
   const solveIdRef = useRef<string | undefined>(undefined)
   const terminalStatusRef = useRef<SolveStatus>('idle')
@@ -130,6 +132,7 @@ export function App() {
     setLiveCandidateIds([])
     setCounterexample(undefined)
     setAlternatives([])
+    setNextPending(false)
     setActiveAlternativeId('')
     setComparisonId(undefined)
     setShowCompare(false)
@@ -154,10 +157,10 @@ export function App() {
       locked_open_streets: [...settings.locked].sort(),
       emergency_permeable: settings.emergencyPermeable,
       objective_mode: settings.objectiveMode,
-      timeout_seconds: timeoutSeconds,
+      timeout_seconds: settings.timeoutSeconds,
       ...(next && solveIdRef.current ? { solve_id: solveIdRef.current } : {}),
     }
-  }, [allPairs, scenario, settings, timeoutSeconds])
+  }, [allPairs, scenario, settings])
 
   const handleSolveEvent = useCallback((event: SolveEvent) => {
     if (event.type !== 'complete') setEvents((current) => [...current, event])
@@ -175,7 +178,9 @@ export function App() {
     } else if (event.type === 'refining' || event.type === 'candidate_rejected') {
       setStatus('refining')
     } else if (isTerminalType(event.type)) {
-      const nextStatus = event.type as SolveStatus
+      const nextStatus = event.result
+        ? statusFromResult(event.result)
+        : (['timeout', 'cancelled', 'data_error'].includes(event.type) ? event.type as SolveStatus : 'data_error')
       terminalStatusRef.current = nextStatus
       setStatus(nextStatus)
     }
@@ -211,11 +216,13 @@ export function App() {
     const controller = new AbortController()
     abortRef.current = controller
     nextRunRef.current = next
+    setNextPending(next)
     alternativeNoticeRef.current = false
     terminalStatusRef.current = 'solving'
     if (!next) {
       setEvents([])
       setResult(undefined)
+      setSelectedCandidate(undefined)
       setAlternatives([])
       setActiveAlternativeId('')
       setComparisonId(undefined)
@@ -235,16 +242,18 @@ export function App() {
           }
           return
         }
-        const alt: Alternative = {
-          id: final.solve_id || `${next ? 'alternative' : 'solution'}-${Date.now()}`,
-          label: next ? `Alternative ${alternatives.length + 1}` : 'Preferred solution',
-          result: final,
+        if (isVerifiedStatus(finalStatus)) {
+          const alt: Alternative = {
+            id: final.solve_id || `${next ? 'alternative' : 'solution'}-${Date.now()}`,
+            label: next ? `Alternative ${alternatives.length + 1}` : 'Preferred solution',
+            result: final,
+          }
+          setAlternatives((current) => {
+            if (current.some((item) => item.result.selected_intervention_ids.join('|') === final.selected_intervention_ids.join('|'))) return current
+            return [...current, alt]
+          })
+          setActiveAlternativeId(alt.id)
         }
-        setAlternatives((current) => {
-          if (current.some((item) => item.result.selected_intervention_ids.join('|') === final.selected_intervention_ids.join('|'))) return current
-          return [...current, alt]
-        })
-        setActiveAlternativeId(alt.id)
         setResult(final)
         setStatus(finalStatus)
         if (isVerifiedStatus(finalStatus)) verifiedResultRef.current = final
@@ -261,21 +270,22 @@ export function App() {
       setResult(indeterminateResult('data_error', message, scenario?.snapshot_id ?? ''))
     } finally {
       if (abortRef.current === controller) abortRef.current = undefined
+      if (next) setNextPending(false)
     }
   }, [alternatives.length, handleSolveEvent, makeRequest, scenario?.snapshot_id, settings.forced])
 
-  const cancel = useCallback(async () => {
+  const cancel = useCallback(() => {
+    const solveId = solveIdRef.current
     terminalStatusRef.current = 'cancelled'
     setStatus('cancelled')
     setResult(indeterminateResult('cancelled', 'The solve was stopped by the user. No feasibility conclusion was reached.', scenario?.snapshot_id ?? ''))
-    try {
-      await cancelSolve(solveIdRef.current)
-    } catch {
+    setActiveAlternativeId('')
+    setNextPending(false)
+    abortRef.current?.abort()
+    abortRef.current = undefined
+    void cancelSolve(solveId).catch(() => {
       // The local abort still leaves the interface in a safe, explicitly cancelled state.
-    } finally {
-      abortRef.current?.abort()
-      abortRef.current = undefined
-    }
+    })
   }, [scenario?.snapshot_id])
 
   const reset = useCallback(() => {
@@ -350,21 +360,23 @@ export function App() {
             </button>
             {!settings.selectedPairKeys.length && <p className="control-warning"><TriangleAlert size={14} />Select at least one portal pair.</p>}
 
-            {displayedResult && !isSolving && (
+            {displayedResult && (!isSolving || nextPending) && (
               <ResultPanel
                 result={displayedResult}
-                status={status}
+                status={nextPending ? statusFromResult(displayedResult) : status}
                 candidates={scenario.candidates}
                 onSelectCandidate={setSelectedCandidate}
                 onNext={() => solve(true)}
                 onCompare={() => setShowCompare(true)}
-                onRaiseBudget={() => { updateSettings({ budget: Math.min(8, settings.budget + 1) }); resetOutcome() }}
-                onUnlock={() => { updateSettings({ locked: settings.locked.slice(0, -1) }); resetOutcome() }}
-                onEditPairs={() => document.querySelector('.portal-pairs')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                onRaiseBudget={(budget) => { updateSettings({ budget: Math.min(8, Math.max(0, budget ?? settings.budget + 1)) }); resetOutcome() }}
+                onUnlock={(candidateId) => { updateSettings({ locked: settings.locked.filter((id) => id !== candidateId) }); resetOutcome() }}
+                onReleaseForced={(candidateId) => { updateSettings({ forced: settings.forced.filter((id) => id !== candidateId) }); resetOutcome() }}
+                onRemovePortalPair={(pair) => { updateSettings({ selectedPairKeys: settings.selectedPairKeys.filter((key) => key !== pairKey(pair)) }); resetOutcome() }}
                 onReviewAssumptions={() => setAdvancedOpen(true)}
+                onOpenMethod={() => setShowMethod(true)}
                 canUnlock={settings.locked.length > 0}
                 alternativeCount={alternatives.length}
-                nextPending={false}
+                nextPending={nextPending}
               />
             )}
 
@@ -381,11 +393,11 @@ export function App() {
             <details className="disclosure" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
               <summary>
                 <span className="summary-icon"><Shield size={15} /></span>
-                <span><strong>Access assumptions</strong><small>{settings.forced.length + settings.locked.length} street constraints</small></span>
+                <span><strong>Access & solver settings</strong><small>{settings.timeoutSeconds}s timeout · {settings.forced.length + settings.locked.length} street constraints</small></span>
                 <ChevronDown className="disclosure__chevron" size={16} />
               </summary>
               <div className="assumption-list">
-                <div className="assumption-static"><Accessibility size={16} /><span><strong>Walking & cycling stay open</strong><small>Filters do not remove these network edges</small></span><Check size={15} /></div>
+                <div className="assumption-static"><Accessibility size={16} /><span><strong>Walking & cycling unchanged in model</strong><small>Filters preserve these mode permissions; routes are not separately verified</small></span><Check size={15} /></div>
                 <label className="assumption-toggle">
                   <HeartPulse size={16} />
                   <span><strong>Emergency-permeable filters</strong><small>Assume removable or unlockable treatment</small></span>
@@ -402,12 +414,13 @@ export function App() {
                     <option value="access">Protect local access</option>
                   </select>
                 </label>
-                <label>Timeout
-                  <select value={timeoutSeconds} onChange={(event) => setTimeoutSeconds(Number(event.target.value))} disabled={isSolving}>
+                <label>Solver timeout
+                  <select value={settings.timeoutSeconds} onChange={(event) => { updateSettings({ timeoutSeconds: Number(event.target.value) }); resetOutcome() }} disabled={isSolving}>
                     <option value="5">5 seconds</option>
                     <option value="10">10 seconds</option>
                     <option value="30">30 seconds</option>
                     <option value="60">60 seconds</option>
+                    <option value="120">120 seconds</option>
                   </select>
                 </label>
               </div>
@@ -425,8 +438,8 @@ export function App() {
 
         <section className="map-region" aria-label="Network analysis map">
           <div className="view-toggle" role="group" aria-label="Network state">
-            <button type="button" className={viewMode === 'before' ? 'is-active' : ''} onClick={() => setViewMode('before')} aria-pressed={viewMode === 'before'}>Before</button>
-            <button type="button" className={viewMode === 'after' ? 'is-active' : ''} onClick={() => setViewMode('after')} aria-pressed={viewMode === 'after'} disabled={!displayedResult && !liveCandidateIds.length}>After</button>
+            <button type="button" className={viewMode === 'before' ? 'is-active' : ''} onClick={() => setViewMode('before')} aria-pressed={viewMode === 'before'}>Before filters</button>
+            <button type="button" className={viewMode === 'after' ? 'is-active' : ''} onClick={() => setViewMode('after')} aria-pressed={viewMode === 'after'} disabled={!displayedResult && !liveCandidateIds.length}>After filters</button>
           </div>
           <div className="portal-readout"><ArrowLeftRight size={14} />{settings.selectedPairKeys.length} route cuts requested</div>
           <MapView
@@ -460,10 +473,10 @@ export function App() {
         </section>
       </main>
 
-      {showMethod && <><button className="sheet-backdrop" type="button" onClick={() => setShowMethod(false)} aria-label="Close methods panel" /><Methodology scenario={scenario} onClose={() => setShowMethod(false)} /></>}
+      {showMethod && <><button className="sheet-backdrop" type="button" onClick={() => setShowMethod(false)} aria-label="Dismiss methods overlay" tabIndex={-1} /><Methodology scenario={scenario} onClose={() => setShowMethod(false)} /></>}
       {showCompare && (
         <>
-          <button className="sheet-backdrop" type="button" onClick={() => setShowCompare(false)} aria-label="Close comparison" />
+          <button className="sheet-backdrop" type="button" onClick={() => setShowCompare(false)} aria-label="Dismiss comparison overlay" tabIndex={-1} />
           <CompareDrawer
             alternatives={alternatives}
             candidates={scenario.candidates}
@@ -557,15 +570,6 @@ function routeFromEvent(event: SolveEvent): Feature<LineString> | LineString | n
 
 function isTerminalType(type: SolveEvent['type']): boolean {
   return ['verified_sat', 'verified_optimal', 'verified_unsat', 'timeout', 'cancelled', 'data_error'].includes(type)
-}
-
-function statusFromResult(result: SolveResult): SolveStatus {
-  const status = String(result.status ?? result.verification_status).toLowerCase().replace(/\s+/g, '_')
-  if (status === 'sat') return 'verified_sat'
-  if (status === 'optimal') return 'verified_optimal'
-  if (status === 'unsat') return 'verified_unsat'
-  if (['verified_sat', 'verified_optimal', 'verified_unsat', 'timeout', 'cancelled', 'data_error'].includes(status)) return status as SolveStatus
-  return result.selected_intervention_ids.length ? 'verified_sat' : 'data_error'
 }
 
 function isVerifiedStatus(status: SolveStatus): boolean {

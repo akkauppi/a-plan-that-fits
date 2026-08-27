@@ -177,12 +177,15 @@ class Scenario:
                     "at least one permitted portal."
                 ),
                 "walking_cycling": (
-                    "Filters do not remove edges from walking or cycling networks."
+                    "Walking and cycling networks are not separately verified. The modal-filter "
+                    "abstraction assumes those modes remain passable."
                 ),
                 "emergency": (
-                    "The default assumes a removable or otherwise emergency-permeable "
-                    "filter; it is not a claim about a literal fixed planter."
+                    "Emergency routes are not separately verified. The default assumes a "
+                    "removable or otherwise emergency-permeable filter; it is not a claim "
+                    "about a literal fixed planter."
                 ),
+                "service_access": "Not implemented or verified; enabling it is rejected.",
             },
         )
         payload.setdefault(

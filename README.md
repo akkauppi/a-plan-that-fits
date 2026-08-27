@@ -11,15 +11,17 @@ It combines a frozen, real OpenStreetMap snapshot of Kallio–Alppiharju–weste
 Vallila with a React/MapLibre research interface and a FastAPI, Z3, and NetworkX
 counterexample-guided solver.
 
-## Current reboot status
+## Current status
 
-The vertical slice, frozen data pipeline, solver/API, and interface are implemented.
-Synthetic solver/API tests and frontend checks pass. One integration issue remains:
-after the visually necessary change from 40 individual boundary markers to eight
-analytical boundary-crossing groups, the default Helsinki solve still reaches its
-timeout. See [the reboot handoff](docs/reboot-handoff.md) for exact evidence and the
-next step. This checkout should therefore be treated as an honest work-in-progress,
-not as the finished operational demonstrator.
+The complete vertical slice is implemented: frozen data pipeline, streaming solver
+API, independent final verification, interactive map, alternatives, timeout and
+cancellation states, explanatory UNSAT output, and desktop/tablet layouts. The portal
+model keeps all 68 detected boundary-crossing records in 38 physically local
+analytical clusters while exposing eight primary portals in the compact browser
+selector. The default budget-four scenario reaches a verified optimum with three
+filters. See [the release handoff](docs/reboot-handoff.md) for measured check results
+and the exact distinction between completed evidence and release checks that should
+be rerun after a change.
 
 ## Run locally
 
@@ -65,8 +67,11 @@ and replaces the derived snapshot. Normal startup and `make data` remain offline
 - Display CRS: WGS84 (`EPSG:4326`)
 
 Current derived contents are 1,342 analytical nodes, 2,408 directed private-car
-edges, 384 eligible modal-filter candidates, eight boundary-crossing portal groups,
-631 OSM building footprints, 182 address clusters, and 678 protected map features.
+edges, 384 eligible modal-filter candidates, 68 boundary-crossing records in 38
+analytical portal clusters, eight browser-selectable primary portals, 631 OSM
+building footprints, 182 address clusters, and 678 protected map features. Portal
+clusters use deterministic complete-link grouping on each boundary side with a 60 m
+maximum diameter; every crossing belongs to exactly one cluster.
 
 The source is OpenStreetMap data, © OpenStreetMap contributors, licensed under the
 [Open Data Commons Open Database License](https://www.openstreetmap.org/copyright).
@@ -88,6 +93,14 @@ the directed graph for surviving routes and address-cluster egress:
 5. A candidate result is checked again on a fresh graph before it can be labelled
    verified.
 
+The default secondary access objective is an inspectable exposure proxy: each
+candidate is charged once for every address cluster whose deterministic baseline
+shortest egress route uses that street segment. It steers the search away from
+streets that support many baseline access routes, but it is not an exact detour
+estimate and may count one cluster against several candidates. Exact directed
+shortest-path detours are recomputed on the final filtered graph and reported as
+post-solution verification metrics.
+
 Timeout, cancellation, solver UNSAT, graph-unblockable routes, and verification/data
 errors are separate machine-readable states. Equal-objective alternatives are
 enumerated by fixing the objective vector and excluding earlier structural sets.
@@ -100,14 +113,18 @@ the [acceptance checklist](docs/acceptance-checklist.md).
 ## Interface
 
 The offline MapLibre canvas renders the study boundary, real street hierarchy and
-buildings, protected transit/major-road corridors, numbered portal groups, address
+buildings, protected transit/major-road corridors, eight numbered primary portals, address
 clusters, oriented cross-street candidate symbols, live counterexample routes,
-selected/forced/locked filters, local access routes, and before/after components.
+selected/forced/locked filters, local access routes, and before/after directed
+strong-connectivity regions (mutual private-car reachability).
 
 The instrument includes a default budget of four, portal-pair selection, force/open
 street constraints, emergency-permeability assumption, real SSE proof activity,
 cancel/reset, alternatives and comparison, URL-serialized settings, responsive tablet
-layout, visible focus states, and reduced-motion support.
+layout, visible focus states, and reduced-motion support. Solver time is adjustable
+under **Access & solver settings** using 5, 10, 30, 60, or 120 seconds; 30 seconds is
+the browser default and the selected value is included in the shareable URL. Reaching
+that limit is reported as indeterminate/timeout, never as UNSAT.
 
 ## Scientific scope and limitations
 
@@ -119,9 +136,23 @@ The strongest intended claim is:
 It does not establish that through-traffic will disappear, predict redistribution,
 approve an emergency-access treatment, guarantee completeness of OSM access tags,
 prove physical or legal feasibility, or constitute a traffic plan. Building clusters
-approximate local private-car access. Walking and cycling remain unchanged by the
-mode-specific filter abstraction. Emergency permeability is asserted only for a
-removable or unlockable treatment—not for a literal fixed planter.
+approximate local private-car access.
+
+The frozen analytical graph is a directed private-car graph. Walking and cycling
+remain passable by the **mode-permission semantics** of a selected filter; they are not
+separately downloaded, routed, or independently proved in this version. Emergency
+permeability is likewise an explicit removable or unlockable treatment assumption,
+not an emergency-network or legal-compliance proof. Service access is not modelled;
+the API rejects requests that try to enable it so an unsupported mode cannot appear
+in a verified result.
+
+The reproducible data command derives topology directly from the committed bounded
+Overpass response. It preserves parallel ways and one-way direction, but this frozen
+scenario is not an OSMnx-produced set of drive/walk/bike mode graphs. OSMnx is
+available as an optional geospatial dependency and a future pipeline direction, not
+the provenance of the current proof graph. The production Vite build also reports a
+single large JavaScript-chunk advisory (about 1.33 MB before gzip, about 368 kB after
+gzip); this is a load-performance improvement opportunity, not a build failure.
 
 ## Repository layout
 
@@ -134,7 +165,14 @@ data/derived/           browser GeoJSON, solver graph, metadata
 docs/                   method, API, acceptance and reboot notes
 ```
 
-The current review screenshot, showing the eight-portal layout but the pre-fix timeout
-state, is at
-[review-pre-optimization-timeout.png](docs/screenshots/review-pre-optimization-timeout.png).
-It is evidence from iteration, not a representative final product image.
+## Release screenshot set
+
+The passing desktop/tablet Playwright run produced the following committed review
+artefacts:
+
+| State | Desktop | Tablet |
+| --- | --- | --- |
+| Before solving | [before, desktop](docs/screenshots/four-planters-before-desktop.png) | [before, tablet](docs/screenshots/four-planters-before-tablet.png) |
+| Verified solution | [verified, desktop](docs/screenshots/four-planters-verified-desktop.png) | [verified, tablet](docs/screenshots/four-planters-verified-tablet.png) |
+| Alternative comparison | [compare, desktop](docs/screenshots/four-planters-compare-desktop.png) | [compare, tablet](docs/screenshots/four-planters-compare-tablet.png) |
+| Infeasible assumptions | [UNSAT, desktop](docs/screenshots/four-planters-unsat-desktop.png) | [UNSAT, tablet](docs/screenshots/four-planters-unsat-tablet.png) |

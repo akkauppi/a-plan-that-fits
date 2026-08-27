@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { AlertTriangle, BookOpenText, CheckCircle2, ExternalLink, X } from 'lucide-react'
 import type { Scenario } from '../types'
 
@@ -7,11 +8,22 @@ interface MethodologyProps {
 }
 
 export function Methodology({ scenario, onClose }: MethodologyProps) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    closeRef.current?.focus()
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
+
   return (
-    <aside className="method-sheet" id="methodology" aria-labelledby="method-title">
+    <aside className="method-sheet" id="methodology" role="dialog" aria-modal="true" aria-labelledby="method-title">
       <div className="method-sheet__head">
         <div><span>Methods & limits</span><h2 id="method-title">What the proof means</h2></div>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="Close methods panel"><X size={18} /></button>
+        <button ref={closeRef} type="button" className="icon-button" onClick={onClose} aria-label="Close methods panel"><X size={18} /></button>
       </div>
       <p className="method-lede">Four Planters tests network permeability. It is a demonstrator and research instrument—not an operational traffic plan.</p>
 
@@ -26,7 +38,7 @@ export function Methodology({ scenario, onClose }: MethodologyProps) {
           <li><span>01</span><p>Z3 proposes a set of eligible local-street filters under the budget and user constraints.</p></li>
           <li><span>02</span><p>NetworkX searches the directed car graph for a surviving route between every required portal pair.</p></li>
           <li><span>03</span><p>Each counterexample becomes a new cut constraint. Candidates that strand an address cluster are rejected.</p></li>
-          <li><span>04</span><p>The final graph is checked independently. Walking, cycling, and assumed emergency access remain passable.</p></li>
+          <li><span>04</span><p>The final private-car graph and local car access are checked independently. The before/after map wash shows directed strong components: maximal regions with mutual private-car reachability, not traffic volumes. Walking and cycling passability, and removable emergency access, remain explicit filter assumptions rather than separate network proofs.</p></li>
         </ol>
       </section>
 
@@ -41,6 +53,7 @@ export function Methodology({ scenario, onClose }: MethodologyProps) {
           <li>No prediction is made about traffic volumes, behaviour, or redistribution outside the boundary.</li>
           <li>OpenStreetMap tags can be incomplete; candidate eligibility is an abstraction, not a site-feasibility audit.</li>
           <li>Emergency access assumes removable or unlockable filters when that option is enabled. It is not legal approval.</li>
+          <li>Walking, cycling, and emergency routes are not separately verified in this frozen scenario.</li>
           <li>Address clusters approximate local private-car access; individual driveways and curb operations are not modelled.</li>
           <li>A planter is the interface symbol. A real treatment could instead be a bollard, gate, camera restriction, or closure.</li>
         </ul>

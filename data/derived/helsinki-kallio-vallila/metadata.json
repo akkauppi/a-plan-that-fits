@@ -1,7 +1,16 @@
 {
   "access_policy": {
     "building_cluster_grid_m": 85,
-    "permitted_portals": "all mapped boundary portals",
+    "optimization_proxy": {
+      "aggregation": "The Z3 objective sums candidate values. A cluster can contribute to more than one selected candidate when its baseline route traverses more than one.",
+      "definition": "Count of address clusters whose deterministic baseline directed shortest route from the cluster's snapped graph node to any permitted boundary portal traverses this candidate. Equal-distance routes are resolved lexicographically by stable edge-ID sequence; a cluster already snapped to a permitted portal has zero-length egress and contributes no exposure.",
+      "field": "candidate.access_penalty",
+      "limitation": "This marginal exposure proxy does not model alternate-route availability, predict traffic, or equal the detour caused by an intervention set.",
+      "metric": "baseline_shortest_egress_route_cluster_count",
+      "unit": "address clusters"
+    },
+    "permitted_portals": "all mapped private-car boundary-crossing clusters, including analytical portals not exposed in the compact browser selector",
+    "post_solution_metrics": "After applying the complete intervention set, the graph verifier recomputes directed shortest egress distance for every served cluster and reports actual additional distance relative to the unfiltered graph.",
     "snap_method": "projected representative-point cluster centroid to nearest graph node"
   },
   "acquired_at": "2026-08-25T23:01:58Z",
@@ -84,10 +93,15 @@
     "topology": "OSM shape points are collapsed between intersections, way endpoints and boundary crossings; parallel ways and one-way directions remain distinct."
   },
   "portal_policy": {
-    "crossings_retained": "all detected non-service boundary crossing nodes",
+    "analytical_portal_count": 38,
+    "boundary_crossing_count": 68,
+    "crossings_retained": "every detected private-car boundary crossing record in the retained graph; each belongs to exactly one analytical portal cluster",
     "display_point": "the member crossing nearest the group centroid",
-    "grouping": "two spatially contiguous sectors per boundary side",
-    "semantics": "Each displayed portal is a contiguous boundary-crossing group. A portal-pair requirement quantifies over every mapped private-car crossing node in both groups."
+    "grouping": "deterministic contiguous complete-link clustering within each boundary side",
+    "maximum_cluster_diameter_m": 60.0,
+    "primary_portal_count": 8,
+    "primary_portals": "two deterministic, spatially distributed portal clusters per side are exposed in the browser; all clusters remain permitted local-access exits in the solver",
+    "semantics": "Each portal is a physically local boundary-crossing cluster. A portal-pair requirement quantifies over every mapped private-car crossing node in both selected clusters."
   },
   "scenario_id": "helsinki-kallio-vallila",
   "snapshot_id": "osm-20260825T222424Z-d8c48f77151b",
@@ -102,18 +116,23 @@
       "unique stable identifiers",
       "all graph references resolve",
       "candidate edges are eligible and unprotected",
+      "candidate access penalties match deterministic baseline egress-route provenance",
       "portal and address-cluster graph references resolve",
+      "every retained boundary crossing belongs to exactly one diameter-bounded portal",
+      "browser export contains exactly two primary portals per boundary side",
       "all included address clusters have permitted portals",
       "default portal pairs have baseline directed routes",
       "all exported GeoJSON geometries are non-empty and valid"
     ],
     "counts": {
       "address_clusters": 182,
+      "boundary_crossings": 68,
       "buildings": 631,
       "candidates": 384,
       "directed_edges": 2408,
       "nodes": 1342,
-      "portals": 8,
+      "portals": 38,
+      "primary_portals": 8,
       "protected_features": 678
     },
     "status": "passed"

@@ -139,7 +139,7 @@ function addAnalysisLayers(map: MapLibreMap, scenario: Scenario): void {
     source: 'components',
     paint: {
       'line-color': ['coalesce', ['get', 'color'], '#4b9991'],
-      'line-opacity': 0.28,
+      'line-opacity': ['case', ['boolean', ['get', 'within_component'], false], 0.3, 0.1],
       'line-width': 8,
     },
   })
@@ -445,9 +445,12 @@ export function MapView({
     const map = mapRef.current
     if (!map || !loaded) return
     const unserved = new Set(result?.address_access_summary?.unserved_ids ?? [])
+    const componentFeatures = viewMode === 'before'
+      ? result?.baseline_components
+      : result?.filtered_components ?? result?.components
     setSourceData(map, 'addresses', addressFeatures(scenario, unserved))
     setSourceData(map, 'access-routes', showAccess ? sourceFeatureCollection(result?.access_routes) : fc([]))
-    setSourceData(map, 'components', viewMode === 'after' ? sourceFeatureCollection(result?.components) : fc([]))
+    setSourceData(map, 'components', sourceFeatureCollection(componentFeatures))
   }, [result, scenario, showAccess, viewMode, loaded])
 
   useEffect(() => {
@@ -495,6 +498,10 @@ export function MapView({
     })
   }
 
+  const componentSummary = result?.private_car_connectivity?.[
+    viewMode === 'before' ? 'baseline' : 'filtered'
+  ]
+
   return (
     <div className="map-shell" aria-label={`Interactive map of ${scenario.name}`}>
       <div className="map-canvas" ref={containerRef} />
@@ -503,6 +510,11 @@ export function MapView({
         <span className="map-context__eyebrow">Study area · Helsinki</span>
         <strong>{scenario.name}</strong>
         <span>{scenario.candidates.filter((candidate) => candidate.eligible).length} eligible street segments</span>
+        {componentSummary && (
+          <span className="map-context__connectivity">
+            {viewMode === 'before' ? 'Before filters' : 'After filters'} · {componentSummary.component_count} mutual car-reachability {componentSummary.component_count === 1 ? 'region' : 'regions'}
+          </span>
+        )}
       </div>
       <div className="map-tools" aria-label="Map display controls">
         <button type="button" className="map-tool" onClick={recenter} aria-label="Recenter study area" title="Recenter study area">

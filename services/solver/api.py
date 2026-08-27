@@ -9,12 +9,12 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .engine import AlternativeContext, FourPlantersSolver, RunRecord
-from .models import CancelRequest, SolveRequest
+from .models import CancelRequest, NextSolutionRequest, SolveRequest
 from .scenario import DEFAULT_BROWSER_PATH, DEFAULT_SOLVER_PATH, Scenario, load_scenario
 
 
@@ -195,9 +195,8 @@ def create_app(
         return stream_run(solve_request)
 
     @app.post("/api/solutions/next")
-    async def next_solution(request: Request) -> StreamingResponse:
-        raw = await request.json()
-        prior_id = str(raw.get("solve_id") or "")
+    async def next_solution(next_request: NextSolutionRequest) -> StreamingResponse:
+        prior_id = next_request.solve_id
         prior = registry.get(prior_id)
         if prior is None:
             raise HTTPException(
@@ -209,8 +208,8 @@ def create_app(
             )
         # The browser sends the full current request. If only solve_id/timeout is
         # supplied, faithfully reuse the previous scenario assumptions.
-        request_fields = set(SolveRequest.model_fields) - {"solve_id"}
-        overrides = {key: value for key, value in raw.items() if key in request_fields}
+        override_fields = next_request.model_fields_set - {"solve_id"}
+        overrides = next_request.model_dump(include=override_fields)
         merged = prior.request.model_dump()
         merged.update(overrides)
         merged["solve_id"] = None

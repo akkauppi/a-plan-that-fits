@@ -1,8 +1,9 @@
 import { AlertTriangle, ArrowUpRight, Check, ChevronRight, Clock3, Copy, MapPinned, ShieldCheck, Sparkles } from 'lucide-react'
-import type { Candidate, SolveResult, SolveStatus } from '../types'
+import type { Candidate, SolveResult, SolveStatus, SuggestedRelaxation } from '../types'
 
-const isVerified = (status: string) => status === 'verified_sat' || status === 'verified_optimal' || status === 'sat' || status === 'optimal'
-const isUnsat = (status: string) => status === 'verified_unsat' || status === 'unsat'
+const isVerified = (status: string, result: SolveResult) =>
+  (status === 'verified_sat' || status === 'verified_optimal') && result.verification_status === 'independently_verified'
+const isUnsat = (status: string) => status === 'verified_unsat'
 
 interface ResultPanelProps {
   result: SolveResult
@@ -11,10 +12,12 @@ interface ResultPanelProps {
   onSelectCandidate: (candidate: Candidate) => void
   onNext: () => void
   onCompare: () => void
-  onRaiseBudget: () => void
-  onUnlock: () => void
-  onEditPairs: () => void
+  onRaiseBudget: (budget?: number) => void
+  onUnlock: (candidateId: string) => void
+  onReleaseForced: (candidateId: string) => void
+  onRemovePortalPair: (pair: { a: string; b: string }) => void
   onReviewAssumptions: () => void
+  onOpenMethod: () => void
   canUnlock: boolean
   alternativeCount: number
   nextPending: boolean
@@ -29,13 +32,15 @@ export function ResultPanel({
   onCompare,
   onRaiseBudget,
   onUnlock,
-  onEditPairs,
+  onReleaseForced,
+  onRemovePortalPair,
   onReviewAssumptions,
+  onOpenMethod,
   canUnlock,
   alternativeCount,
   nextPending,
 }: ResultPanelProps) {
-  if (isVerified(status) || isVerified(result.status)) {
+  if (isVerified(status, result)) {
     const access = result.address_access_summary ?? {}
     const served = Number(access.served ?? (access.all_accessible ? access.total : 0) ?? 0)
     const total = Number(access.total ?? served)
@@ -93,7 +98,7 @@ export function ResultPanel({
     )
   }
 
-  if (isUnsat(status) || isUnsat(result.status)) {
+  if (isUnsat(status)) {
     return (
       <section className="result-panel result-panel--unsat" aria-label="Verified infeasible result" role="alert">
         <div className="result-status">
@@ -111,11 +116,11 @@ export function ResultPanel({
           <span>Try one change — nothing is changed automatically</span>
           {result.suggested_relaxations?.length ? result.suggested_relaxations.map((suggestion, index) => {
             const item = typeof suggestion === 'string' ? { label: suggestion, type: '' } : suggestion
-            return <button type="button" key={`${item.label}-${index}`} onClick={() => relaxationAction(item.type, { onRaiseBudget, onUnlock, onEditPairs, onReviewAssumptions })}>{item.label}<ChevronRight size={15} /></button>
+            return <button type="button" key={`${item.label}-${index}`} onClick={() => relaxationAction(item, { onRaiseBudget, onUnlock, onReleaseForced, onRemovePortalPair, onReviewAssumptions })}>{item.label}<ChevronRight size={15} /></button>
           }) : (
             <>
-              <button type="button" onClick={onRaiseBudget}>Increase budget by one <ChevronRight size={15} /></button>
-              {canUnlock && <button type="button" onClick={onUnlock}>Remove an open-street lock <ChevronRight size={15} /></button>}
+              <button type="button" onClick={() => onRaiseBudget()}>Increase budget by one <ChevronRight size={15} /></button>
+              {canUnlock && <button type="button" onClick={onReviewAssumptions}>Review locked streets <ChevronRight size={15} /></button>}
             </>
           )}
         </div>
@@ -131,7 +136,9 @@ export function ResultPanel({
         <div><span>Indeterminate — not UNSAT</span><h2>{title}</h2></div>
       </div>
       <p>{result.explanation || 'No claim about feasibility can be made from this run. Adjust the timeout or try again.'}</p>
-      <a href="#methodology">Why this is different from infeasible <ArrowUpRight size={13} /></a>
+      <button type="button" className="result-method-link" onClick={onOpenMethod}>
+        Why this is different from infeasible <ArrowUpRight size={13} />
+      </button>
     </section>
   )
 }
@@ -146,11 +153,22 @@ function humanize(value: string): string {
 }
 
 function relaxationAction(
-  type: string | undefined,
-  actions: { onRaiseBudget: () => void; onUnlock: () => void; onEditPairs: () => void; onReviewAssumptions: () => void },
+  suggestion: SuggestedRelaxation,
+  actions: {
+    onRaiseBudget: (budget?: number) => void
+    onUnlock: (candidateId: string) => void
+    onReleaseForced: (candidateId: string) => void
+    onRemovePortalPair: (pair: { a: string; b: string }) => void
+    onReviewAssumptions: () => void
+  },
 ): void {
-  if (type === 'increase_budget') actions.onRaiseBudget()
-  else if (type === 'unlock_candidate' || type === 'unlock_street') actions.onUnlock()
-  else if (type === 'remove_portal_pair') actions.onEditPairs()
-  else actions.onReviewAssumptions()
+  const type = suggestion.type ?? suggestion.action
+  if (type === 'increase_budget') actions.onRaiseBudget(suggestion.value)
+  else if ((type === 'unlock_candidate' || type === 'unlock_street') && suggestion.candidate_id) {
+    actions.onUnlock(suggestion.candidate_id)
+  } else if (type === 'release_forced_intervention' && suggestion.candidate_id) {
+    actions.onReleaseForced(suggestion.candidate_id)
+  } else if (type === 'remove_portal_pair' && suggestion.pair) {
+    actions.onRemovePortalPair(suggestion.pair)
+  } else actions.onReviewAssumptions()
 }

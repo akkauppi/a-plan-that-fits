@@ -131,6 +131,45 @@ export interface AddressAccessSummary {
   [key: string]: unknown
 }
 
+export interface SuggestedRelaxation {
+  id?: string
+  label: string
+  action?: string
+  type?: string
+  value?: number
+  pair?: { a: string; b: string }
+  candidate_id?: string
+}
+
+export interface PrivateCarComponentSummary {
+  component_count: number
+  node_count: number
+  largest_component_node_count: number
+  largest_component_fraction: number
+  singleton_component_count: number
+  open_directed_edge_count: number
+  rendered_physical_edge_count: number
+  inter_component_physical_edge_count: number
+}
+
+export interface PrivateCarConnectivity {
+  metric: 'directed_strongly_connected_components'
+  definition: string
+  baseline: PrivateCarComponentSummary
+  filtered: PrivateCarComponentSummary
+}
+
+export interface ConnectivityComponentProperties {
+  metric: 'directed_strongly_connected_components'
+  directed: true
+  component_id: number | null
+  component_size: number | null
+  from_component_id: number
+  to_component_id: number
+  within_component: boolean
+  color: string
+}
+
 export interface SolveResult {
   status: SolveStatus | string
   selected_intervention_ids: string[]
@@ -145,16 +184,13 @@ export interface SolveResult {
   snapshot_id: string
   solve_id: string
   unsat_core?: string[]
-  suggested_relaxations?: Array<{
-    id?: string
-    label: string
-    action?: string
-    type?: string
-    pair?: { a: string; b: string }
-    candidate_id?: string
-  } | string>
+  suggested_relaxations?: Array<SuggestedRelaxation | string>
   access_routes?: FeatureCollection<LineString>
-  components?: FeatureCollection
+  private_car_connectivity?: PrivateCarConnectivity
+  baseline_components?: FeatureCollection<LineString, ConnectivityComponentProperties>
+  filtered_components?: FeatureCollection<LineString, ConnectivityComponentProperties>
+  /** Compatibility alias for filtered_components. */
+  components?: FeatureCollection<LineString, ConnectivityComponentProperties>
   [key: string]: unknown
 }
 
@@ -171,6 +207,7 @@ export interface ScenarioSettings {
   locked: string[]
   emergencyPermeable: boolean
   objectiveMode: SolveRequest['objective_mode']
+  timeoutSeconds: number
 }
 
 export function asFeatureCollection(features?: Array<Feature<Geometry>>): FeatureCollection {

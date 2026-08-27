@@ -9,6 +9,7 @@ import type {
   SolveEvent,
   SolveRequest,
   SolveResult,
+  SuggestedRelaxation,
 } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? '/api'
@@ -101,6 +102,25 @@ function portalPair(raw: unknown): PortalPair {
   const a = String(values[0] ?? '')
   const b = String(values[1] ?? '')
   return { a, b, label: String(item.label ?? `Portal ${a} — ${b}`) }
+}
+
+function suggestedRelaxation(value: unknown): SuggestedRelaxation | string {
+  if (typeof value === 'string') return value
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const pairRaw = raw.pair && typeof raw.pair === 'object' ? raw.pair as Record<string, unknown> : undefined
+  const pair = pairRaw?.a != null && pairRaw.b != null
+    ? { a: String(pairRaw.a), b: String(pairRaw.b) }
+    : undefined
+  const numericValue = raw.value == null ? undefined : Number(raw.value)
+  return {
+    label: String(raw.label ?? 'Review this assumption'),
+    ...(raw.id != null ? { id: String(raw.id) } : {}),
+    ...(raw.type != null ? { type: String(raw.type) } : {}),
+    ...(raw.action != null ? { action: String(raw.action) } : {}),
+    ...(raw.candidate_id != null ? { candidate_id: String(raw.candidate_id) } : {}),
+    ...(pair ? { pair } : {}),
+    ...(numericValue != null && Number.isFinite(numericValue) ? { value: numericValue } : {}),
+  }
 }
 
 export function normalizeScenario(rawValue: unknown): Scenario {
@@ -209,7 +229,7 @@ function normalizeResult(rawValue: unknown): SolveResult {
         })
       : undefined,
     suggested_relaxations: Array.isArray(raw.suggested_relaxations)
-      ? (raw.suggested_relaxations as SolveResult['suggested_relaxations'])
+      ? raw.suggested_relaxations.map(suggestedRelaxation)
       : undefined,
   } as SolveResult
 }

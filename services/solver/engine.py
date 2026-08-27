@@ -9,6 +9,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from itertools import combinations
 from typing import Any
 
 import networkx as nx
@@ -197,6 +198,19 @@ class FourPlantersSolver:
         access_clauses = list(alternative.access_clauses) if alternative else []
         exclusions = list(alternative.excluded_solutions) if alternative else []
         fixed_objectives = dict(alternative.objective_values) if alternative else None
+        objective_keys = self._objective_keys(request.objective_mode)
+        # During CEGIS, secondary optimisation is work on a relaxation that may
+        # immediately be invalidated by the next graph counterexample.  Prove
+        # the primary (filter-count) optimum while discovering paths, then run
+        # the full lexicographic objective vector only after a graph-feasible
+        # model has been found.  Any new route exposed by that structural
+        # choice returns the loop to the inexpensive refinement phase.
+        optimise_full_objective = alternative is not None or len(objective_keys) == 1
+        # Path and access clauses are only ever strengthened.  Once an earlier
+        # relaxation proves a cardinality lower bound, no later refinement can
+        # admit a smaller solution.  Carrying that proof forward avoids asking
+        # Z3 to re-prove the same expensive UNSAT bound every iteration.
+        primary_lower_bound = int((fixed_objectives or {}).get("intervention_count", 0))
 
         while True:
             iteration += 1
@@ -218,12 +232,36 @@ class FourPlantersSolver:
                 exclusions,
                 fixed_objectives,
                 deadline,
+                cancel_event,
+                optimise_secondary=optimise_full_objective,
+                primary_lower_bound=primary_lower_bound,
             )
+            if answer.status == "cancelled":
+                yield from finish(
+                    "cancelled",
+                    "Solving was cancelled. No claim about feasibility has been made.",
+                )
+                break
             if answer.status == "timeout":
                 yield from finish(
                     "timeout",
                     "The constraint solver reached its time limit. This is not an UNSAT result.",
                     result_fields={"diagnostics": {"z3_reason": answer.reason}},
+                )
+                break
+            if answer.status == "error":
+                yield from finish(
+                    "data_error",
+                    (
+                        "The deterministic model selector disagreed with the Z3 model; "
+                        "no feasibility claim has been made."
+                    ),
+                    result_fields={
+                        "diagnostics": {
+                            "kind": "model_selection_inconsistency",
+                            "reason": answer.reason,
+                        }
+                    },
                 )
                 break
             if answer.status == "unsat":
@@ -253,6 +291,9 @@ class FourPlantersSolver:
 
             selected = answer.selected
             objective_values = answer.objectives
+            primary_lower_bound = max(
+                primary_lower_bound, int(objective_values.get("intervention_count", 0))
+            )
             LOGGER.info(
                 json.dumps(
                     {
@@ -275,6 +316,15 @@ class FourPlantersSolver:
             )
 
             counterexamples = self._counterexample_batch(selected, pairs)
+            control = self._control_state(deadline, cancel_event)
+            if control:
+                message = (
+                    "Solving was cancelled. No claim about feasibility has been made."
+                    if control == "cancelled"
+                    else "The solver reached its time limit. This is not an UNSAT result."
+                )
+                yield from finish(control, message)
+                break
             if counterexamples:
                 counterexample = counterexamples[0]
                 route = counterexample["route"]
@@ -335,15 +385,31 @@ class FourPlantersSolver:
                         pair_label=item["pair_label"],
                         candidate_ids=tuple(sorted(item["route"]["candidate_ids"])),
                     )
-                    if clause not in path_clauses and clause not in new_clauses:
+                    if clause not in new_clauses:
                         new_clauses.append(clause)
-                path_clauses.extend(new_clauses)
-                representative_clause = new_clauses[0]
-                route_word = "routes" if len(new_clauses) != 1 else "route"
+                added_clauses = self._merge_path_clauses(path_clauses, new_clauses)
+                optimise_full_objective = alternative is not None
+                if not added_clauses:
+                    yield from finish(
+                        "data_error",
+                        (
+                            "Refinement rediscovered a route already represented by the "
+                            "constraint model; no result is claimed."
+                        ),
+                        result_fields={
+                            "diagnostics": {
+                                "kind": "refinement_stalled",
+                                "counterexample": counterexample,
+                            }
+                        },
+                    )
+                    break
+                representative_clause = added_clauses[0]
+                route_word = "routes" if len(added_clauses) != 1 else "route"
                 yield event(
                     "refining",
                     "refining",
-                    f"The model now cuts {len(new_clauses)} distinct surviving {route_word} "
+                    f"The model now cuts {len(added_clauses)} distinct surviving {route_word} "
                     "found across the selected portal groups.",
                     {
                         "clause": {
@@ -357,9 +423,9 @@ class FourPlantersSolver:
                                 "pair_key": clause.pair_key,
                                 "candidate_ids": list(clause.candidate_ids),
                             }
-                            for clause in new_clauses
+                            for clause in added_clauses
                         ],
-                        "routes_added": len(new_clauses),
+                        "routes_added": len(added_clauses),
                     },
                 )
                 continue
@@ -382,6 +448,7 @@ class FourPlantersSolver:
                 clause = AccessClause(failed_access["cluster_id"], tuple(sorted(selected)))
                 if clause not in access_clauses:
                     access_clauses.append(clause)
+                optimise_full_objective = alternative is not None
                 yield event(
                     "candidate_rejected",
                     "candidate_found",
@@ -411,6 +478,25 @@ class FourPlantersSolver:
                 )
                 continue
 
+            if not optimise_full_objective:
+                optimise_full_objective = True
+                yield event(
+                    "refining",
+                    "refining",
+                    (
+                        "A minimum-filter cut is graph-feasible. The solver is now "
+                        "optimising cost and spacing before final verification."
+                    ),
+                    {
+                        "clause": {
+                            "kind": "objective_phase",
+                            "primary_objective": "intervention_count",
+                            "secondary_objectives": list(objective_keys[1:]),
+                        }
+                    },
+                )
+                continue
+
             verification = self.verify_solution(request, selected, pairs)
             if not verification["verified"]:
                 yield from finish(
@@ -425,7 +511,8 @@ class FourPlantersSolver:
 
             metrics = self._access_metrics(selected)
             access_routes = self._access_routes_geojson(selected)
-            components = self._components_geojson(selected)
+            baseline_components, baseline_component_summary = self._components_geojson(frozenset())
+            filtered_components, filtered_component_summary = self._components_geojson(selected)
             proof_payload = {
                 "selected_intervention_ids": sorted(selected),
                 "objective_values": objective_values,
@@ -433,24 +520,39 @@ class FourPlantersSolver:
                 "address_access_summary": verification["address_access_summary"],
                 "portal_connectivity_summary": verification["portal_connectivity_summary"],
                 "mode_connectivity_summary": {
-                    "walking": "unchanged_by_filter_semantics",
-                    "cycling": "unchanged_by_filter_semantics",
+                    "walking": "not_separately_modelled_filter_assumed_passable",
+                    "cycling": "not_separately_modelled_filter_assumed_passable",
                     "emergency": (
-                        "passable_under_removable_filter_assumption"
+                        "not_separately_modelled_removable_filter_assumption"
                         if request.emergency_permeable
                         else "not_asserted"
                     ),
+                    "service_access": "unsupported_not_verified",
                 },
                 "local_detour_metrics": metrics,
                 "access_routes": access_routes,
-                "components": components,
+                "private_car_connectivity": {
+                    "metric": "directed_strongly_connected_components",
+                    "definition": (
+                        "A component is a maximal set of private-car graph nodes where every "
+                        "node can reach every other node following directed street edges."
+                    ),
+                    "baseline": baseline_component_summary,
+                    "filtered": filtered_component_summary,
+                },
+                "baseline_components": baseline_components,
+                "filtered_components": filtered_components,
+                # Compatibility alias for clients that predate the explicit
+                # before/after component collections.
+                "components": filtered_components,
                 "proof_hash": self._proof_hash(request, selected, verification),
             }
             explanation = (
                 f"Under snapshot {self.scenario.snapshot_id}, the selected filters cut every "
                 "requested private-car portal connection while every included address cluster "
-                "retains a permitted portal route. Walking and cycling edges are unchanged by "
-                "the filter semantics."
+                "retains a permitted private-car portal route. Walking and cycling passability "
+                "and removable emergency passage are filter assumptions; those mode networks "
+                "are not separately verified."
             )
             context = AlternativeContext(
                 objective_values=objective_values,
@@ -502,6 +604,11 @@ class FourPlantersSolver:
         }
 
     def _validate_request(self, request: SolveRequest) -> str | None:
+        if request.service_access_enabled:
+            return (
+                "Service-access preservation is not implemented or verified; "
+                "set service_access_enabled to false."
+            )
         if request.scenario_id != self.scenario.id:
             return (
                 f"Unknown scenario {request.scenario_id!r}; "
@@ -641,6 +748,10 @@ class FourPlantersSolver:
         exclusions: Sequence[frozenset[str]],
         fixed_objectives: dict[str, int] | None,
         deadline: float,
+        cancel_event: threading.Event,
+        *,
+        optimise_secondary: bool = True,
+        primary_lower_bound: int = 0,
     ) -> CandidateAnswer:
         variables = {
             candidate: z3.Bool(f"blocked__{candidate}") for candidate in self.candidate_ids
@@ -661,20 +772,48 @@ class FourPlantersSolver:
                     ]
                 )
             )
+        primary_bound_expression: z3.BoolRef | None = None
         if fixed_objectives:
             for key, value in fixed_objectives.items():
                 if key in expressions:
                     internal.append(expressions[key] == value)
+        elif primary_lower_bound > 0:
+            # This is a previously proved consequence of the tracked records,
+            # not a new user-facing assumption.  Keep it out of ``internal`` so
+            # UNSAT-core extraction still reports the original causes.
+            primary_bound_expression = expressions["intervention_count"] >= primary_lower_bound
 
-        objective_keys = self._objective_keys(request.objective_mode)
+        requested_objective_keys = self._objective_keys(request.objective_mode)
+        objective_keys = (
+            requested_objective_keys
+            if optimise_secondary or fixed_objectives
+            else requested_objective_keys[:1]
+        )
         search = z3.Solver()
-        search.set(timeout=max(1, int((deadline - time.monotonic()) * 1000)), random_seed=0)
+        search.set(random_seed=0)
         search.add(*[record.expression for record in records], *internal)
-        status = search.check()
+        if primary_bound_expression is not None:
+            search.add(primary_bound_expression)
+        status, control = self._cooperative_solver_check(search, deadline, cancel_event)
+        if control:
+            return CandidateAnswer(control, reason="solve control requested during Z3 check")
+        assert status is not None
         if status == z3.unknown:
             return CandidateAnswer("timeout", reason=search.reason_unknown())
         if status == z3.unsat:
-            core = self._unsat_core(records, internal, deadline)
+            if primary_bound_expression is not None:
+                # The bound is a solver-proved consequence of the earlier,
+                # weaker relaxation.  Since records only strengthen during a
+                # run, the complete current record set is a valid (though not
+                # necessarily minimal) core when UNSAT relies on that lemma.
+                # Expanding the lemma back to its tracked causes also avoids
+                # exposing an opaque internal constraint to users.
+                core = list(records)
+            else:
+                core = self._unsat_core(records, internal, deadline, cancel_event)
+                control = self._control_state(deadline, cancel_event)
+                if control:
+                    return CandidateAnswer(control, reason="solve control requested during core")
             return CandidateAnswer("unsat", unsat_core=core)
         current_model = search.model()
         objectives: dict[str, int] = {}
@@ -697,19 +836,29 @@ class FourPlantersSolver:
                     objectives.get("intervention_count", current_value),
                     current_value,
                 )
+                if key == "intervention_count" and primary_lower_bound:
+                    domain = [value for value in domain if value >= primary_lower_bound]
                 current_index = domain.index(current_value)
                 # Ask for the immediately cheaper attainable value. A SAT
                 # model may jump several values; a single UNSAT answer then
                 # proves the current value minimal. This avoids broad numeric
                 # binary searches over impossible weighted-cost values.
                 while current_index > 0:
-                    if time.monotonic() >= deadline:
-                        return CandidateAnswer("timeout", reason="objective search deadline")
+                    control = self._control_state(deadline, cancel_event)
+                    if control:
+                        return CandidateAnswer(control, reason="objective search control request")
                     threshold = domain[current_index - 1]
-                    search.set(timeout=max(1, int((deadline - time.monotonic()) * 1000)))
                     search.push()
                     search.add(expression <= threshold)
-                    bounded_status = search.check()
+                    bounded_status, control = self._cooperative_solver_check(
+                        search, deadline, cancel_event
+                    )
+                    if control:
+                        search.pop()
+                        return CandidateAnswer(
+                            control, reason="solve control requested during objective search"
+                        )
+                    assert bounded_status is not None
                     if bounded_status == z3.sat:
                         bounded_model = search.model()
                         current_value = bounded_model.eval(
@@ -726,45 +875,175 @@ class FourPlantersSolver:
                     search.pop()
                 objectives[key] = current_value
                 search.add(expression == current_value)
-                search.set(timeout=max(1, int((deadline - time.monotonic()) * 1000)))
-                fixed_status = search.check()
+                fixed_status, control = self._cooperative_solver_check(
+                    search, deadline, cancel_event
+                )
+                if control:
+                    return CandidateAnswer(
+                        control, reason="solve control requested while fixing an objective"
+                    )
+                assert fixed_status is not None
                 if fixed_status != z3.sat:
                     return CandidateAnswer("timeout", reason=search.reason_unknown())
                 current_model = search.model()
 
-        # Select a unique Boolean model after fixing the real objective vector.
-        # Only variables that occur in a discovered/user constraint can be true
-        # in a minimum-cardinality solution; fixing all others open keeps the
-        # incremental tie-break compact even for hundreds of street candidates.
+        # Z3 has established the exact objective vector. Select a unique model
+        # with a small deterministic hitting-set search over only candidates
+        # that occur in discovered/user constraints. This is an enumeration
+        # tie-break, not another city objective, and avoids relying on Z3's
+        # intentionally unspecified choice among equal Boolean models.
+        try:
+            selected = self._deterministic_selection(
+                request,
+                path_clauses,
+                access_clauses,
+                exclusions,
+                objectives,
+                deadline,
+                cancel_event,
+            )
+        except TimeoutError:
+            control = self._control_state(deadline, cancel_event)
+            return CandidateAnswer(
+                control or "timeout",
+                reason="structural tie-break cancelled"
+                if control == "cancelled"
+                else "structural tie-break deadline",
+            )
+        if selected is None:
+            return CandidateAnswer(
+                "error", reason="deterministic selector found no equal-objective model"
+            )
+        # Include current values for the complete public vector even during the
+        # cardinality-only refinement phase.  Secondary values are descriptive
+        # until the explicit full-objective phase has completed.
+        objectives = self._selected_objective_values(selected, requested_objective_keys)
+        return CandidateAnswer("sat", selected, objectives)
+
+    def _deterministic_selection(
+        self,
+        request: SolveRequest,
+        path_clauses: Sequence[PathClause],
+        access_clauses: Sequence[AccessClause],
+        exclusions: Sequence[frozenset[str]],
+        fixed_objectives: dict[str, int],
+        deadline: float,
+        cancel_event: threading.Event,
+    ) -> frozenset[str] | None:
+        if self._control_state(deadline, cancel_event):
+            raise TimeoutError
+        target_count = int(fixed_objectives.get("intervention_count", 0))
         active = set(request.forced_interventions)
         active.update(candidate for clause in path_clauses for candidate in clause.candidate_ids)
         active.update(candidate for clause in access_clauses for candidate in clause.candidate_ids)
         active.update(candidate for solution in exclusions for candidate in solution)
-        selector = z3.Solver()
-        selector.set(timeout=max(1, int((deadline - time.monotonic()) * 1000)), random_seed=0)
-        selector.add(*[record.expression for record in records], *internal)
-        selector.add(
-            *[expressions[key] == value for key, value in objectives.items() if key in expressions]
+        locked = set(request.locked_open_streets)
+        ordered = tuple(sorted(active - locked))
+        index_by_candidate = {candidate: index for index, candidate in enumerate(ordered)}
+
+        def mask_for(candidates: Sequence[str] | frozenset[str]) -> int:
+            mask = 0
+            for candidate in candidates:
+                index = index_by_candidate.get(candidate)
+                if index is not None:
+                    mask |= 1 << index
+            return mask
+
+        forced_mask = mask_for(request.forced_interventions)
+        if forced_mask.bit_count() != len(request.forced_interventions):
+            return None
+        path_masks = tuple(mask_for(clause.candidate_ids) for clause in path_clauses)
+        if any(mask == 0 for mask in path_masks):
+            return None
+        access_masks = tuple(
+            mask for clause in access_clauses if (mask := mask_for(clause.candidate_ids))
         )
-        selector.add(
-            *[
-                z3.Not(variables[candidate])
-                for candidate in self.candidate_ids
-                if candidate not in active
+        excluded_masks = {mask_for(solution) for solution in exclusions}
+        forced_count = forced_mask.bit_count()
+        optional_indices = tuple(
+            index for index in range(len(ordered)) if not forced_mask & (1 << index)
+        )
+        optional_slots = target_count - forced_count
+        if optional_slots < 0 or optional_slots > len(optional_indices):
+            return None
+
+        def objectives_match(mask: int) -> bool:
+            if set(fixed_objectives) == {"intervention_count"}:
+                return True
+            selected = frozenset(
+                candidate for index, candidate in enumerate(ordered) if mask & (1 << index)
+            )
+            values = self._selected_objective_values(selected, tuple(fixed_objectives))
+            return all(values[key] == value for key, value in fixed_objectives.items())
+
+        for choice_index, choice in enumerate(combinations(optional_indices, optional_slots)):
+            if choice_index % 1024 == 0 and self._control_state(deadline, cancel_event):
+                raise TimeoutError
+            selected_mask = forced_mask
+            for index in choice:
+                selected_mask |= 1 << index
+            if any(not selected_mask & clause_mask for clause_mask in path_masks):
+                continue
+            if any(selected_mask & mask == mask for mask in access_masks):
+                continue
+            if selected_mask in excluded_masks or not objectives_match(selected_mask):
+                continue
+            return frozenset(
+                candidate for index, candidate in enumerate(ordered) if selected_mask & (1 << index)
+            )
+        return None
+
+    def _selected_objective_values(
+        self, selected: frozenset[str], keys: Sequence[str]
+    ) -> dict[str, int]:
+        values = {
+            "intervention_count": len(selected),
+            "weighted_cost": sum(self.scenario.candidates[item].cost for item in selected),
+            "access_penalty": sum(
+                self.scenario.candidates[item].access_penalty for item in selected
+            ),
+            "adjacency_penalty": sum(
+                left in selected and right in selected for left, right in self._close_pairs
+            ),
+        }
+        return {key: int(values[key]) for key in keys}
+
+    @staticmethod
+    def _merge_path_clauses(
+        existing: list[PathClause], incoming: Sequence[PathClause]
+    ) -> list[PathClause]:
+        """Merge path cuts while retaining a logically equivalent antichain.
+
+        For clauses belonging to the same portal pair, ``Or(A)`` subsumes
+        ``Or(B)`` when ``A`` is a subset of ``B``.  Keeping only subset-minimal
+        routes removes large numbers of overlapping boundary-node paths without
+        weakening the CEGIS relaxation.
+        """
+
+        added: list[PathClause] = []
+        for clause in sorted(
+            incoming,
+            key=lambda item: (item.pair_key, len(item.candidate_ids), item.candidate_ids),
+        ):
+            candidate_set = set(clause.candidate_ids)
+            if any(
+                current.pair_key == clause.pair_key
+                and set(current.candidate_ids).issubset(candidate_set)
+                for current in existing
+            ):
+                continue
+            existing[:] = [
+                current
+                for current in existing
+                if not (
+                    current.pair_key == clause.pair_key
+                    and candidate_set.issubset(set(current.candidate_ids))
+                )
             ]
-        )
-        # Stable variable/constraint insertion plus a fixed Z3 seed gives a
-        # reproducible structural model without adding a hidden city objective.
-        selector.set(timeout=max(1, int((deadline - time.monotonic()) * 1000)))
-        if selector.check() != z3.sat:
-            return CandidateAnswer("timeout", reason=selector.reason_unknown())
-        model = selector.model()
-        selected = frozenset(
-            candidate
-            for candidate, variable in variables.items()
-            if z3.is_true(model.eval(variable, model_completion=True))
-        )
-        return CandidateAnswer("sat", selected, objectives)
+            existing.append(clause)
+            added.append(clause)
+        existing.sort(key=lambda item: (item.pair_key, len(item.candidate_ids), item.candidate_ids))
+        return added
 
     @staticmethod
     def _objective_keys(mode: str) -> tuple[str, ...]:
@@ -795,9 +1074,9 @@ class FourPlantersSolver:
         records: Sequence[ConstraintRecord],
         internal: Sequence[z3.BoolRef],
         deadline: float,
+        cancel_event: threading.Event,
     ) -> list[ConstraintRecord]:
         solver = z3.Solver()
-        solver.set(timeout=max(1, int((deadline - time.monotonic()) * 1000)))
         assumptions: list[z3.BoolRef] = []
         by_name: dict[str, ConstraintRecord] = {}
         for index, record in enumerate(records):
@@ -806,9 +1085,51 @@ class FourPlantersSolver:
             by_name[assumption.decl().name()] = record
             solver.add(z3.Implies(assumption, record.expression))
         solver.add(*internal)
-        if solver.check(*assumptions) != z3.unsat:
+        status, control = FourPlantersSolver._cooperative_solver_check(
+            solver, deadline, cancel_event, *assumptions
+        )
+        if control or status != z3.unsat:
             return []
         return [by_name[item.decl().name()] for item in solver.unsat_core()]
+
+    @staticmethod
+    def _cooperative_solver_check(
+        solver: z3.Solver,
+        deadline: float,
+        cancel_event: threading.Event,
+        *assumptions: z3.BoolRef,
+    ) -> tuple[z3.CheckSatResult | None, str | None]:
+        """Run a Z3 check that a cancellation request can interrupt promptly.
+
+        Z3's Python call blocks its worker thread. A short-lived watcher invokes
+        the solver's thread-safe interrupt hook only when this run's cancellation
+        event is set. The solver retains its normal deadline as a distinct timeout.
+        """
+
+        control = FourPlantersSolver._control_state(deadline, cancel_event)
+        if control:
+            return None, control
+        solver.set(timeout=max(1, int((deadline - time.monotonic()) * 1000)))
+        finished = threading.Event()
+
+        def interrupt_when_cancelled() -> None:
+            while not finished.wait(0.01):
+                if cancel_event.is_set():
+                    solver.interrupt()
+                    return
+
+        watcher = threading.Thread(
+            target=interrupt_when_cancelled,
+            name="four-planters-z3-cancel",
+            daemon=True,
+        )
+        watcher.start()
+        try:
+            status = solver.check(*assumptions)
+        finally:
+            finished.set()
+            watcher.join(timeout=0.1)
+        return status, FourPlantersSolver._control_state(deadline, cancel_event)
 
     def _counterexample_batch(
         self, selected: frozenset[str], pairs: Sequence[PortalPair]
@@ -844,6 +1165,39 @@ class FourPlantersSolver:
                                 "route": route,
                             }
                         )
+
+        # Seed each endpoint with two deterministic alternatives. Temporarily
+        # removing one candidate from the base route can only reveal another
+        # route that is open in the actual selected graph, so every resulting
+        # clause is a sound CEGIS counterexample. This bounded diversity avoids
+        # several expensive solve/refine round trips without attempting to
+        # enumerate all paths.
+        alternatives: list[dict[str, Any]] = []
+        for item in list(found):
+            candidate_ids = item["route"]["candidate_ids"]
+            middle = (len(candidate_ids) - 1) / 2
+            candidate_indices = sorted(
+                range(len(candidate_ids)), key=lambda index: (abs(index - middle), index)
+            )
+            alternatives_for_endpoint = 0
+            for candidate_index in candidate_indices:
+                route = self._shortest_route(
+                    [item["source_node_id"]],
+                    [item["target_node_id"]],
+                    selected | frozenset({candidate_ids[candidate_index]}),
+                )
+                if route is None:
+                    continue
+                candidate_key = tuple(sorted(route["candidate_ids"]))
+                clause_key = (item["pair_key"], candidate_key)
+                if clause_key in seen_clauses:
+                    continue
+                seen_clauses.add(clause_key)
+                alternatives.append({**item, "route": route})
+                alternatives_for_endpoint += 1
+                if alternatives_for_endpoint >= 2:
+                    break
+        found.extend(alternatives)
         found.sort(
             key=lambda item: (
                 not bool(item["route"]["candidate_ids"]),
@@ -883,6 +1237,19 @@ class FourPlantersSolver:
                 for node in self.scenario.portals[portal_id].node_ids
             }
         )
+        if node_id in targets and node_id in self.scenario.nodes:
+            node = self.scenario.nodes[node_id]
+            point = [float(node["lon"]), float(node["lat"])]
+            return {
+                "node_ids": [node_id],
+                "edge_ids": [],
+                "candidate_ids": [],
+                "street_names": [],
+                "length_m": 0.0,
+                # GeoJSON LineStrings require at least two positions. A
+                # repeated point safely represents zero-length portal access.
+                "geometry": {"type": "LineString", "coordinates": [point, point]},
+            }
         return self._shortest_route([node_id], targets, selected)
 
     def _shortest_route(
@@ -985,13 +1352,44 @@ class FourPlantersSolver:
             errors.append("a locked-open street is selected")
         if not selected.issubset(self.scenario.candidates):
             errors.append("a selected intervention is ineligible")
+
+        # Deliberately rebuild a fresh NetworkX graph instead of reusing the
+        # custom Dijkstra implementation that generates CEGIS counterexamples.
+        # This is the independent final connectivity check: a defect in route
+        # reconstruction or the solver's adjacency cache cannot certify itself.
+        blocked_edges = {
+            edge_id
+            for candidate_id in selected
+            if candidate_id in self.scenario.candidates
+            for edge_id in self.scenario.candidates[candidate_id].edge_ids
+        }
+        verification_graph = nx.DiGraph()
+        verification_graph.add_nodes_from(self.scenario.nodes)
+        for edge_id, edge in self.scenario.edges.items():
+            if edge_id not in blocked_edges:
+                verification_graph.add_edge(edge["u"], edge["v"])
+
+        reachable_cache: dict[tuple[str, ...], set[str]] = {}
+
+        def reachable_from(sources: Sequence[str]) -> set[str]:
+            key = tuple(sorted(set(sources)))
+            cached = reachable_cache.get(key)
+            if cached is not None:
+                return cached
+            reachable = set(key)
+            for source in key:
+                if source in verification_graph:
+                    reachable.update(nx.descendants(verification_graph, source))
+            reachable_cache[key] = reachable
+            return reachable
+
         pair_summary: list[dict[str, Any]] = []
         for pair in pairs:
             portal_a = self.scenario.portals[pair.a]
             portal_b = self.scenario.portals[pair.b]
-            forward = self._shortest_route(portal_a.node_ids, portal_b.node_ids, selected)
-            reverse = self._shortest_route(portal_b.node_ids, portal_a.node_ids, selected)
-            disconnected = forward is None and reverse is None
+            forward_exists = bool(reachable_from(portal_a.node_ids).intersection(portal_b.node_ids))
+            reverse_exists = bool(reachable_from(portal_b.node_ids).intersection(portal_a.node_ids))
+            disconnected = not forward_exists and not reverse_exists
             if not disconnected:
                 errors.append(f"portal pair {pair.a} ↔ {pair.b} remains connected")
             pair_summary.append(
@@ -1000,16 +1398,34 @@ class FourPlantersSolver:
                     "b": pair.b,
                     "label": pair.label or self._pair_label(pair.a, pair.b),
                     "private_car_disconnected": disconnected,
-                    "forward_route_exists": forward is not None,
-                    "reverse_route_exists": reverse is not None,
+                    "forward_route_exists": forward_exists,
+                    "reverse_route_exists": reverse_exists,
                 }
             )
         served = 0
         unserved: list[str] = []
         cluster_details: list[dict[str, Any]] = []
+        reverse_graph = verification_graph.reverse(copy=False)
+        access_cache: dict[tuple[str, ...], set[str]] = {}
         for cluster in self.scenario.address_clusters.values():
-            route = self._route_to_portals(cluster.node_id, cluster.allowed_portal_ids, selected)
-            if route:
+            portal_key = tuple(sorted(cluster.allowed_portal_ids))
+            nodes_reaching_portals = access_cache.get(portal_key)
+            if nodes_reaching_portals is None:
+                portal_nodes = sorted(
+                    {
+                        node_id
+                        for portal_id in portal_key
+                        if portal_id in self.scenario.portals
+                        for node_id in self.scenario.portals[portal_id].node_ids
+                    }
+                )
+                nodes_reaching_portals = set(portal_nodes)
+                for portal_node in portal_nodes:
+                    if portal_node in reverse_graph:
+                        nodes_reaching_portals.update(nx.descendants(reverse_graph, portal_node))
+                access_cache[portal_key] = nodes_reaching_portals
+            is_served = cluster.node_id in nodes_reaching_portals
+            if is_served:
                 served += 1
             else:
                 unserved.append(cluster.id)
@@ -1017,8 +1433,7 @@ class FourPlantersSolver:
             cluster_details.append(
                 {
                     "id": cluster.id,
-                    "served": route is not None,
-                    "route_length_m": route["length_m"] if route else None,
+                    "served": is_served,
                 }
             )
         return {
@@ -1092,26 +1507,49 @@ class FourPlantersSolver:
             )
         return {"type": "FeatureCollection", "features": features}
 
-    def _components_geojson(self, selected: frozenset[str]) -> dict[str, Any]:
+    def _components_geojson(
+        self, selected: frozenset[str]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Describe directed private-car strong connectivity for one graph state.
+
+        Strongly connected components are the appropriate directed analogue of
+        connected regions: every node within one component can reach every other
+        node while respecting one-way streets. Open edges between components are
+        retained in the GeoJSON but identified as one-way inter-component links;
+        they are not coloured as though they belonged to either mutual-reachability
+        region.
+        """
+
         blocked_edges = {
             edge_id
             for candidate in selected
             for edge_id in self.scenario.candidates[candidate].edge_ids
         }
-        graph = nx.Graph()
+        graph = nx.DiGraph()
         graph.add_nodes_from(self.scenario.nodes)
+        open_directed_edge_count = 0
         for edge in self.scenario.edges.values():
             if edge["id"] not in blocked_edges:
                 graph.add_edge(edge["u"], edge["v"])
+                open_directed_edge_count += 1
         components = sorted(
-            nx.connected_components(graph), key=lambda values: (-len(values), min(values))
+            (set(values) for values in nx.strongly_connected_components(graph)),
+            key=lambda values: (-len(values), min(values)),
         )
         component_by_node = {
             node: index for index, component in enumerate(components) for node in component
         }
         palette = ("#3c8b84", "#db7a37", "#516fa8", "#9a6688", "#82914d", "#967258")
+        color_by_component = {
+            index: palette[
+                int(hashlib.sha256(min(component).encode("utf-8")).hexdigest()[:8], 16)
+                % len(palette)
+            ]
+            for index, component in enumerate(components)
+        }
         features: list[dict[str, Any]] = []
         seen_physical: set[str] = set()
+        inter_component_physical_edges = 0
         for edge in sorted(self.scenario.edges.values(), key=lambda value: value["id"]):
             if edge["id"] in blocked_edges:
                 continue
@@ -1119,7 +1557,12 @@ class FourPlantersSolver:
             if physical_id in seen_physical:
                 continue
             seen_physical.add(physical_id)
-            component_id = component_by_node.get(edge["u"], 0)
+            from_component_id = component_by_node[edge["u"]]
+            to_component_id = component_by_node[edge["v"]]
+            within_component = from_component_id == to_component_id
+            if not within_component:
+                inter_component_physical_edges += 1
+            component_id = from_component_id if within_component else None
             geometry = edge.get("geometry")
             if isinstance(geometry, dict):
                 geometry = geometry.get("coordinates")
@@ -1132,14 +1575,39 @@ class FourPlantersSolver:
                     "type": "Feature",
                     "id": f"component-{physical_id}",
                     "properties": {
+                        "metric": "directed_strongly_connected_components",
+                        "directed": True,
                         "component_id": component_id,
-                        "component_size": len(components[component_id]),
-                        "color": palette[component_id % len(palette)],
+                        "component_size": (
+                            len(components[component_id]) if component_id is not None else None
+                        ),
+                        "from_component_id": from_component_id,
+                        "to_component_id": to_component_id,
+                        "within_component": within_component,
+                        "color": (
+                            color_by_component[component_id]
+                            if component_id is not None
+                            else "#777c79"
+                        ),
                     },
                     "geometry": {"type": "LineString", "coordinates": geometry},
                 }
             )
-        return {"type": "FeatureCollection", "features": features}
+        node_count = len(self.scenario.nodes)
+        largest_component_size = len(components[0]) if components else 0
+        summary = {
+            "component_count": len(components),
+            "node_count": node_count,
+            "largest_component_node_count": largest_component_size,
+            "largest_component_fraction": (
+                round(largest_component_size / node_count, 4) if node_count else 0.0
+            ),
+            "singleton_component_count": sum(len(component) == 1 for component in components),
+            "open_directed_edge_count": open_directed_edge_count,
+            "rendered_physical_edge_count": len(features),
+            "inter_component_physical_edge_count": inter_component_physical_edges,
+        }
+        return {"type": "FeatureCollection", "features": features}, summary
 
     def _explain_unsat(
         self,

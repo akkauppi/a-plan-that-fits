@@ -50,6 +50,12 @@ def test_frozen_helsinki_scenario_invariants_and_determinism() -> None:
     )
     assert first_result["address_access_summary"]["served"] == len(scenario.address_clusters)
     assert first_result["address_access_summary"]["all_accessible"] is True
+    connectivity = first_result["private_car_connectivity"]
+    assert connectivity["metric"] == "directed_strongly_connected_components"
+    assert connectivity["baseline"]["node_count"] == len(scenario.nodes)
+    assert connectivity["filtered"]["node_count"] == len(scenario.nodes)
+    assert first_result["baseline_components"]["features"]
+    assert first_result["filtered_components"]["features"]
 
     verification = solver.verify_solution(request, selected)
     assert verification["verified"] is True

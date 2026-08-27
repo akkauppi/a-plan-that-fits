@@ -46,4 +46,23 @@ describe('solver event stream', () => {
     const result = await parseEventStream(response, vi.fn())
     expect(result?.unsat_core).toEqual(['Budget is at most four', 'locked:e1'])
   })
+
+  it('preserves typed targets in human-readable UNSAT suggestions', async () => {
+    const response = new Response(JSON.stringify({
+      status: 'verified_unsat',
+      suggested_relaxations: [
+        { type: 'unlock_street', candidate_id: 42, label: 'Unlock Testikatu' },
+        { action: 'remove_portal_pair', pair: { a: 1, b: 'south' }, label: 'Remove the pair' },
+        { type: 'increase_budget', value: '6', label: 'Try six' },
+      ],
+    }), { headers: { 'Content-Type': 'application/json' } })
+
+    const result = await parseEventStream(response, vi.fn())
+
+    expect(result?.suggested_relaxations).toEqual([
+      { type: 'unlock_street', candidate_id: '42', label: 'Unlock Testikatu' },
+      { action: 'remove_portal_pair', pair: { a: '1', b: 'south' }, label: 'Remove the pair' },
+      { type: 'increase_budget', value: 6, label: 'Try six' },
+    ])
+  })
 })
