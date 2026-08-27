@@ -173,6 +173,8 @@ details[open] > summary .disclosure__chevron { transform: rotate(180deg); }
 .legend-line.protected { border-color: var(--blue); border-width: 3px; }
 .legend-line.counterexample { border-color: var(--coral); border-style: dashed; border-width: 3px; }
 .legend-line.component { border-color: var(--teal); border-width: 7px; opacity: .38; }
+.legend-zone.boundary { display: block; flex: none; width: 21px; height: 9px; border: 1px dashed #646b67; background: rgba(104,112,108,.13); }
+.legend-zone.portal { display: block; flex: none; width: 21px; height: 9px; border: 1px dotted #4f7277; background: rgba(79,114,119,.13); border-radius: 50%; }
 .legend-filter { width: 12px; height: 3px; display: block; border-radius: 9px; background: #777a74; }
 .legend-filter.selected { height: 5px; background: var(--orange); box-shadow: 0 0 0 2px #fff; }
 .legend-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 2px #fff; }

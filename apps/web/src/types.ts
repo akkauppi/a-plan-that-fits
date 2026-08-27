@@ -27,6 +27,12 @@ export interface Candidate {
   cost: number
   eligible: boolean
   reason?: string
+  boundary_distance_m?: number
+  boundary_distance_metric?: string
+  nearest_primary_portal_distance_m?: number
+  nearest_primary_portal_distance_metric?: string
+  nearest_primary_portal_id?: string
+  nearest_primary_portal_crossing_id?: string
 }
 
 export interface AddressCluster {
@@ -38,6 +44,13 @@ export interface AddressCluster {
   building_count?: number
 }
 
+export interface SetbackZoneProperties {
+  setback_m: number
+  boundary_distance_metric?: string
+  nearest_primary_portal_distance_metric?: string
+  [key: string]: unknown
+}
+
 export interface Scenario {
   id: string
   name: string
@@ -47,6 +60,8 @@ export interface Scenario {
   bbox: [number, number, number, number]
   center: Coordinate
   boundary: Feature<Polygon | MultiPolygon>
+  terminal_zone: Feature<Polygon | MultiPolygon, SetbackZoneProperties>
+  portal_approach_zones: Feature<Polygon | MultiPolygon, SetbackZoneProperties>
   streets: FeatureCollection
   buildings: FeatureCollection
   protected_corridors: FeatureCollection

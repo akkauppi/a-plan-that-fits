@@ -11,7 +11,15 @@ Returns service state and the loaded snapshot identifier.
 
 Returns the immutable browser scenario: metadata, bounding polygon, street and
 building feature collections, protected corridors, portals, candidate cross-street
-symbols, address clusters, default portal pairs, and visible attribution.
+symbols, address clusters, default portal pairs, visible attribution, and the
+GeoJSON terminal zone in which otherwise local street segments are ineligible under
+the 60 m analysis-boundary setback rule. It also returns
+`portal_approach_zones`, the boundary-clipped union of 120 m EPSG:3067 buffers around
+the mapped crossing points of all eight primary/selectable portals. This second,
+static candidate setback is independent of which pairs a request selects. Candidate
+records expose both distances plus the nearest primary portal and source-crossing
+IDs. These zones communicate analytical endpoint-bias assumptions, not protected
+transport or site-feasibility findings.
 
 ## `POST /api/solve`
 
@@ -36,9 +44,8 @@ review-friendly presets 5, 10, 30, 60, and 120 seconds, defaults to 30 seconds, 
 serializes a non-default selection as `timeout=` in the shareable URL. The API schema
 accepts values from 0.01 through 120 seconds for diagnostic clients. Expiry produces
 a terminal `timeout` result with an indeterminate explanation; it is never translated
-to `verified_unsat`. For backward compatibility, an API caller that omits the field
-receives the service default of 10 seconds; the browser always sends its explicit
-selection.
+to `verified_unsat`. An API caller that omits the field receives the service default
+of 30 seconds; the browser always sends its explicit selection.
 
 `service_access_enabled` is reserved for a future separately modelled service-access
 graph. The current API accepts only `false`; requesting `true` returns HTTP 422 with

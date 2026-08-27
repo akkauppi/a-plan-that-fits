@@ -30,7 +30,7 @@ class SolveRequest(BaseModel):
         ),
     )
     objective_mode: Literal["balanced", "fewest", "access", "minimum_filters"] = "balanced"
-    timeout_seconds: float = Field(default=10.0, ge=0.01, le=120.0)
+    timeout_seconds: float = Field(default=30.0, ge=0.01, le=120.0)
     solve_id: str | None = None
 
     @field_validator("required_portal_pairs", mode="before")

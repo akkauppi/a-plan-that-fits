@@ -32,7 +32,13 @@ export function CandidateInspector({ candidate, forced, locked, onForce, onLock,
           {(forced || locked) && <button type="button" onClick={onClear} disabled={disabled}>Clear</button>}
         </div>
       )}
-      <p>Filters block private cars but preserve walking and cycling in this model.</p>
+      <p>
+        Filters block private cars but preserve walking and cycling in this model.
+        {candidate.boundary_distance_m != null && ` Filter marker midpoint is ${candidate.boundary_distance_m.toFixed(1)} m from the analysis boundary`}
+        {candidate.nearest_primary_portal_distance_m != null
+          ? ` and ${candidate.nearest_primary_portal_distance_m.toFixed(1)} m from the nearest selectable portal crossing.`
+          : candidate.boundary_distance_m != null ? '.' : ''}
+      </p>
     </section>
   )
 }

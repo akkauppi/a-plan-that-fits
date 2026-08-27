@@ -18,8 +18,8 @@ API, independent final verification, interactive map, alternatives, timeout and
 cancellation states, explanatory UNSAT output, and desktop/tablet layouts. The portal
 model keeps all 68 detected boundary-crossing records in 38 physically local
 analytical clusters while exposing eight primary portals in the compact browser
-selector. The default budget-four scenario reaches a verified optimum with three
-filters. See [the release handoff](docs/reboot-handoff.md) for measured check results
+selector. Four is an upper bound, not a required count; the audited default scenario
+uses all four at its verified optimum. See [the release handoff](docs/reboot-handoff.md) for measured check results
 and the exact distinction between completed evidence and release checks that should
 be rerun after a change.
 
@@ -67,11 +67,27 @@ and replaces the derived snapshot. Normal startup and `make data` remain offline
 - Display CRS: WGS84 (`EPSG:4326`)
 
 Current derived contents are 1,342 analytical nodes, 2,408 directed private-car
-edges, 384 eligible modal-filter candidates, 68 boundary-crossing records in 38
+edges, 272 eligible modal-filter candidates, 68 boundary-crossing records in 38
 analytical portal clusters, eight browser-selectable primary portals, 631 OSM
 building footprints, 182 address clusters, and 678 protected map features. Portal
 clusters use deterministic complete-link grouping on each boundary side with a 60 m
 maximum diameter; every crossing belongs to exactly one cluster.
+
+Candidate eligibility has two explicit anti-endpoint-bias controls. A 60 m
+**analysis-boundary terminal zone** measures each physical-segment midpoint to the
+study boundary in EPSG:3067. A second 120 m setback measures that same midpoint to
+the nearest mapped crossing point belonging to any of the eight primary/selectable
+portals—not to its display marker, not only to portals selected in the current
+request, and not to all 38 analytical portals. Of 384 base-eligible local segments,
+80 fall in the boundary band and 79 in a primary-portal approach zone; 47 overlap,
+so the portal rule adds 32 exclusions and leaves 272 candidates. Both zones remain
+ordinary open graph streets and are shown in the browser. They are analytical bias
+controls, not public-transport protection or physical/legal siting judgements.
+
+The audited defaults are Vilhonvuorenkuja ↔ Agricolankuja
+(**Southern cross-neighbourhood permeability**) and Pälkäneentie ↔ Alppikatu
+(**Western cross-neighbourhood permeability**). With four as the maximum, the
+balanced optimum uses four filters outside both setback zones.
 
 The source is OpenStreetMap data, © OpenStreetMap contributors, licensed under the
 [Open Data Commons Open Database License](https://www.openstreetmap.org/copyright).
@@ -81,7 +97,8 @@ checksum, policies, versions, and validation results are in
 
 ## Solver method
 
-Each eligible physical street segment has a Boolean `blocked[candidate_id]`. Z3
+Each eligible physical street segment outside both analytical setback zones has a Boolean
+`blocked[candidate_id]`. Z3
 enforces the intervention budget, forced filters, open-street locks, discovered path
 cuts, access corrections, and explicit lexicographic objectives. NetworkX then checks
 the directed graph for surviving routes and address-cluster egress:

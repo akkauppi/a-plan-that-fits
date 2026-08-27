@@ -87,6 +87,27 @@ def test_forced_intervention_is_hard_constraint() -> None:
     assert final_result(events)["selected_intervention_ids"] == ["c2"]
 
 
+def test_inactive_objective_reduction_keeps_forced_disconnected_candidate() -> None:
+    scenario = synthetic_scenario(
+        [
+            *undirected("west-a", "W", "A", "route_cut"),
+            *undirected("a-east", "A", "E"),
+            *undirected("unrelated", "X", "Y", "forced_elsewhere"),
+        ],
+        candidate_costs={"route_cut": 100, "forced_elsewhere": 90},
+    )
+
+    events, _ = FourPlantersSolver(scenario).solve_to_completion(
+        request(forced_interventions=["forced_elsewhere"])
+    )
+    result = final_result(events)
+
+    assert result["status"] == "verified_optimal"
+    assert set(result["selected_intervention_ids"]) == {"route_cut", "forced_elsewhere"}
+    assert result["objective_values"]["intervention_count"] == 2
+    assert result["objective_values"]["weighted_cost"] == 190
+
+
 def test_locked_open_candidate_is_never_selected() -> None:
     scenario = synthetic_scenario(
         [

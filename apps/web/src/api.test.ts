@@ -7,15 +7,63 @@ describe('scenario normalization', () => {
       id: 'kallio-2026',
       name: 'Kallio',
       bbox: [24.94, 60.18, 24.97, 60.2],
+      terminal_zone: {
+        type: 'Feature',
+        properties: {
+          setback_m: 72,
+          boundary_distance_metric: 'projected_candidate_display_point_to_study_boundary',
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [24.94, 60.18], [24.97, 60.18], [24.97, 60.2], [24.94, 60.2], [24.94, 60.18],
+          ], [
+            [24.941, 60.181], [24.941, 60.199], [24.969, 60.199], [24.969, 60.181], [24.941, 60.181],
+          ]],
+        },
+      },
+      portal_approach_zones: {
+        type: 'Feature',
+        properties: {
+          setback_m: 120,
+          nearest_primary_portal_distance_metric: 'projected_candidate_display_point_to_nearest_primary_portal_crossing',
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [24.94, 60.18], [24.945, 60.18], [24.945, 60.185], [24.94, 60.185], [24.94, 60.18],
+          ]],
+        },
+      },
       portals: [{ id: 'n', label: 'North', direction: 'N', point: [24.95, 60.2] }],
-      candidates: [{ edge_id: 'e-1', street_name: 'Testikatu', point: [24.95, 60.19] }],
+      candidates: [{
+        edge_id: 'e-1',
+        street_name: 'Testikatu',
+        point: [24.95, 60.19],
+        boundary_distance_m: 72.4,
+        boundary_distance_metric: 'projected_candidate_display_point_to_study_boundary',
+        nearest_primary_portal_distance_m: 143.7,
+        nearest_primary_portal_distance_metric: 'projected_candidate_display_point_to_nearest_primary_portal_crossing',
+        nearest_primary_portal_id: 'n',
+        nearest_primary_portal_crossing_id: 'x-n',
+      }],
       default_portal_pairs: [['n', 's']],
     })
 
     expect(scenario.id).toBe('kallio-2026')
     expect(scenario.candidates[0]).toMatchObject({ id: 'e-1', street_name: 'Testikatu', eligible: true })
     expect(scenario.candidates[0]?.cross_geometry.coordinates).toHaveLength(2)
+    expect(scenario.candidates[0]?.boundary_distance_m).toBe(72.4)
+    expect(scenario.candidates[0]?.nearest_primary_portal_distance_m).toBe(143.7)
+    expect(scenario.terminal_zone.properties.setback_m).toBe(72)
+    expect(scenario.portal_approach_zones.properties.setback_m).toBe(120)
     expect(scenario.default_portal_pairs[0]).toMatchObject({ a: 'n', b: 's' })
+  })
+
+  it('rejects a scenario that omits the boundary-setback geometry', () => {
+    expect(() => normalizeScenario({ id: 'incomplete' })).toThrow(
+      'Scenario data is missing a valid candidate boundary-setback zone.',
+    )
   })
 })
 

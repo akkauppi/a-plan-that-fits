@@ -30,6 +30,23 @@ emergency graphs. Its two products serve different purposes:
   analytical portals, all 68 source crossing records, address clusters, and analysis
   metadata.
 
+Candidate generation applies two projected midpoint setbacks. The first is 60 m from
+the analysis boundary. The second is 120 m from the nearest actual crossing point
+belonging to any of the static eight primary/selectable portals. Both use Euclidean
+EPSG:3067 distance from the physical-segment midpoint used as the candidate display
+point. The second rule does not use portal display markers, does not change with the
+currently requested pairs, and does not include the other 30 analytical portals.
+Primary portals are selected from pre-setback base eligibility before either portal
+approach exclusion is applied; portal adjacency is refreshed from final candidates.
+
+Otherwise eligible local segments inside either zone remain ordinary open graph
+edges but receive no intervention variable. They are **ineligible**, not protected
+transit infrastructure. The browser exports the boundary band and the unioned,
+boundary-clipped primary-portal approach zones as inspectable GeoJSON. Edge, street,
+and candidate records retain the rounded distances, metric identifier, nearest
+primary portal ID, and nearest source-crossing ID. These are reproducible analytical
+bias controls, not physical or legal siting rules.
+
 Keeping display geometry separate lets the browser remain responsive without
 changing the graph on which the proof is based. The files are committed so ordinary
 application startup makes no external geodata request.
@@ -40,6 +57,15 @@ private-car crossing record belongs to exactly one cluster. Two spatially distri
 named local clusters per side are marked primary for browser editing; all analytical
 clusters remain permitted local-access exits in solver verification. A selected
 portal-pair requirement quantifies over every graph node in each selected cluster.
+The two defaults are explicit scenario-specific pairs after both setback controls:
+east-south Vilhonvuorenkuja ↔ south-west Agricolankuja
+(southern cross-neighbourhood permeability) and north-west Pälkäneentie ↔
+west-south Alppikatu (western cross-neighbourhood permeability). The labels avoid
+claiming these adjacent-side pairs are north–south or east–west cuts. Preprocessing
+requires a candidate-bearing deterministic shortest route in each direction; the
+frozen-scenario solver invariant separately establishes exact-four feasibility and
+independent final verification. The intervention budget is an upper bound; the
+default maximum is four.
 
 ## Constraint and verification loop
 

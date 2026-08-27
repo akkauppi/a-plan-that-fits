@@ -42,6 +42,24 @@ function featureCollection(value: unknown): FeatureCollection {
   return { type: 'FeatureCollection', features: [] }
 }
 
+function setbackZone(value: unknown, label: string): Scenario['terminal_zone'] {
+  const feature = value as Feature<Polygon | MultiPolygon> | undefined
+  const geometryType = feature?.geometry?.type
+  const setback = Number(feature?.properties?.setback_m)
+  if (
+    feature?.type !== 'Feature'
+    || (geometryType !== 'Polygon' && geometryType !== 'MultiPolygon')
+    || !Number.isFinite(setback)
+    || setback <= 0
+  ) {
+    throw new ApiError(`Scenario data is missing a valid ${label}.`)
+  }
+  return {
+    ...feature,
+    properties: { ...(feature.properties ?? {}), setback_m: setback },
+  } as Scenario['terminal_zone']
+}
+
 function portal(raw: Record<string, unknown>, index: number): Portal {
   return {
     id: String(raw.id ?? `portal-${index + 1}`),
@@ -82,6 +100,20 @@ function candidate(raw: Record<string, unknown>, index: number): Candidate {
     cost: Number(raw.cost ?? 1),
     eligible: raw.eligible !== false,
     reason: raw.reason ? String(raw.reason) : undefined,
+    boundary_distance_m: raw.boundary_distance_m == null ? undefined : Number(raw.boundary_distance_m),
+    boundary_distance_metric: raw.boundary_distance_metric ? String(raw.boundary_distance_metric) : undefined,
+    nearest_primary_portal_distance_m: raw.nearest_primary_portal_distance_m == null
+      ? undefined
+      : Number(raw.nearest_primary_portal_distance_m),
+    nearest_primary_portal_distance_metric: raw.nearest_primary_portal_distance_metric
+      ? String(raw.nearest_primary_portal_distance_metric)
+      : undefined,
+    nearest_primary_portal_id: raw.nearest_primary_portal_id
+      ? String(raw.nearest_primary_portal_id)
+      : undefined,
+    nearest_primary_portal_crossing_id: raw.nearest_primary_portal_crossing_id
+      ? String(raw.nearest_primary_portal_crossing_id)
+      : undefined,
   }
 }
 
@@ -155,6 +187,11 @@ export function normalizeScenario(rawValue: unknown): Scenario {
     bbox,
     center: coordinate(raw.center, [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]),
     boundary,
+    terminal_zone: setbackZone(raw.terminal_zone, 'candidate boundary-setback zone'),
+    portal_approach_zones: setbackZone(
+      raw.portal_approach_zones,
+      'selectable-portal approach zone',
+    ),
     streets: featureCollection(raw.streets),
     buildings: featureCollection(raw.buildings),
     protected_corridors: featureCollection(raw.protected_corridors),

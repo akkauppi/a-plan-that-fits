@@ -21,8 +21,9 @@ since the initial checkpoint.
 - Distinct verified-optimal, verified-UNSAT, timeout, cancelled, unblockable-route,
   and data/verification-error outcomes.
 
-The default budget-four, two-pair Helsinki request has a verified optimum using three
-filters. A result reaches a verified label only after a fresh NetworkX graph confirms
+The audited default two-pair Helsinki request has a verified optimum using four
+filters under a maximum budget of four. The budget is an upper bound, not an
+exact-count requirement. A result reaches a verified label only after a fresh NetworkX graph confirms
 the requested private-car disconnections and local address-cluster egress.
 
 ## Frozen scenario and portal semantics
@@ -37,7 +38,11 @@ The derived dataset contains:
 ```text
 1,342 analytical nodes
 2,408 directed private-car edges
-384 eligible modal-filter candidates
+272 eligible modal-filter candidates
+384 base-eligible local segments before analytical setbacks
+80 otherwise eligible segments excluded by the analysis-boundary terminal zone
+79 otherwise eligible segments excluded by primary-portal approach zones
+47 segments shared by both setbacks / 32 additional portal-approach exclusions
 68 retained boundary-crossing records
 38 analytical portal clusters / 8 browser primary portals
 182 address clusters / 631 building footprints
@@ -50,6 +55,22 @@ one cluster and keeps its OSM way/node, road-class, direction, point, and cluste
 provenance. The browser exposes two named, spatially distributed primary clusters per
 side. A selected pair quantifies over every member node in both clusters, while local
 access may terminate at any of the 38 analytical portals.
+
+Candidates use a 60 m projected analysis-boundary setback measured from each
+physical-segment midpoint in EPSG:3067. A static second rule excludes a base-eligible
+midpoint within 120 m of the nearest actual crossing point belonging to any of the
+eight primary/selectable portals. It uses neither the portal marker nor only the
+currently selected pairs, and it does not use all 38 analytical portals. Primary
+selection is computed before this approach rule, so the exclusion cannot move its
+own source portals. Segments in either zone remain open and ineligible for
+intervention; they are not classified as protected transit. The unioned approach
+zones and their source IDs are exported for browser inspection.
+
+The explicit audited defaults are Vilhonvuorenkuja ↔ Agricolankuja
+(southern cross-neighbourhood permeability) and Pälkäneentie ↔ Alppikatu (western
+cross-neighbourhood permeability). The budget-four optimum uses four filters outside
+both zones. These setbacks reduce terminal-capping solutions, but they are analytical
+bias controls rather than physical or legal siting rules.
 
 ## Objectives and connectivity semantics
 
@@ -85,18 +106,23 @@ conservative OSM-tag abstraction, not a complete operations model.
 
 ## Recorded evidence
 
-The final 2026-08-27 release checks recorded:
+For the 2026-08-28 dual-setback revision, deterministic preprocessing and strict
+geometry/reference reconstruction passed twice in 4.27–4.32 seconds per rebuild.
+The four derived-file hashes were unchanged across rebuilds. The targeted Helsinki
+invariant ran two identical balanced solves, independently verified the exact-four
+result and local access, and passed in 3.93 seconds. The final working-tree checks
+recorded:
 
 ```text
 scenario preprocessing validation: passed
 portal/access provenance validation: passed
-Python solver/API/invariant suite: 29 tests passed in 19.31 seconds
-frontend unit regression: 22 tests passed
+Python solver/API/invariant suite: 30 tests passed in 7.21 seconds
+frontend unit regression: 24 tests passed
 TypeScript strict typecheck: passed
 frontend ESLint: passed
 Python Ruff: passed
 production Vite build: passed with large-chunk advisory
-Playwright desktop/tablet main story: 8 tests passed in 2.2 minutes
+Playwright desktop/tablet main story: 8 tests passed in 1.4 minutes
 desktop 1440 × 900 browser audit: no material console/layout/a11y errors
 tablet 820 × 1180 browser audit: no material console/layout/a11y errors
 ```

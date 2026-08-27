@@ -46,6 +46,18 @@
     ]
   ],
   "candidate_policy": {
+    "additional_primary_portal_approach_exclusions": 32,
+    "analysis_boundary_setback_m": 60.0,
+    "base_eligible_physical_segments": 384,
+    "boundary_distance_definition": "Euclidean distance in EPSG:3067 from the physical segment midpoint used as the candidate display point to the projected study-polygon boundary. The unrounded distance is used for eligibility; the exported value is rounded to 0.1 metre.",
+    "boundary_distance_export_records": [
+      "edge",
+      "street",
+      "candidate"
+    ],
+    "boundary_distance_field": "candidate.boundary_distance_m",
+    "boundary_distance_metric": "projected_candidate_display_point_to_study_boundary",
+    "eligible_candidate_physical_segments": 272,
     "eligible_highways": [
       "living_street",
       "residential",
@@ -61,14 +73,62 @@
       "trunk",
       "trunk_link"
     ],
+    "ineligible_conditions": [
+      "street class outside the eligible local-street classes",
+      "bridge or tunnel",
+      "physical segment shorter than 10 metres",
+      "otherwise eligible segment midpoint less than 60 metres from the analysis boundary",
+      "otherwise eligible segment midpoint less than 120 metres from the nearest crossing point of any primary/selectable portal"
+    ],
     "minimum_segment_length_m": 10,
+    "nearest_primary_portal_distance_definition": "Euclidean distance in EPSG:3067 from the physical segment midpoint used as the candidate display point to the nearest mapped boundary-crossing point belonging to any of the eight primary/selectable portals. Portal display markers and the other analytical portals are not distance origins. The unrounded distance is used for eligibility; the exported value is rounded to 0.1 metre. Equal-distance ties use portal ID then crossing ID.",
+    "nearest_primary_portal_distance_export_records": [
+      "edge",
+      "street",
+      "candidate"
+    ],
+    "nearest_primary_portal_distance_field": "candidate.nearest_primary_portal_distance_m",
+    "nearest_primary_portal_distance_metric": "projected_candidate_display_point_to_nearest_primary_portal_crossing",
+    "primary_portal_approach_ineligible_physical_segments": 79,
+    "primary_portal_approach_semantics": "Otherwise eligible local segment midpoints less than 120 metres from any crossing point in the static eight-primary-portal set are ineligible. This reduces solutions that merely cap a selected portal approach. It is an analytical endpoint-bias control, not a physical or legal siting rule.",
+    "primary_portal_approach_setback_m": 120.0,
+    "primary_portal_approach_source_crossing_ids": [
+      "x-128274422-1526055684",
+      "x-138703901-1016087855",
+      "x-139917030-1533278161",
+      "x-194445375-34517202",
+      "x-243139230-316249945",
+      "x-26426336-34638220",
+      "x-30472606-257728113",
+      "x-32278095-1544144326",
+      "x-37102271-431474635",
+      "x-5085840-762470187",
+      "x-73849833-873846763",
+      "x-75614914-892733295",
+      "x-76765513-904375765",
+      "x-82198456-1526055661",
+      "x-83826866-975923037"
+    ],
+    "primary_portal_approach_source_portal_ids": [
+      "p-east-01",
+      "p-east-06",
+      "p-north-03",
+      "p-north-07",
+      "p-south-04",
+      "p-south-07",
+      "p-west-01",
+      "p-west-07"
+    ],
     "protected_conditions": [
       "motorway, trunk, primary or secondary street and links",
       "explicit bus/PSV lane tags or trolley wire",
-      "road geometry following mapped tram/light-rail infrastructure",
-      "bridge or tunnel"
+      "road geometry following mapped tram/light-rail infrastructure"
     ],
-    "semantics": "Each modal filter removes all directed private-car edges represented by its physical street segment. Walking and cycling remain unchanged; emergency passage assumes a removable or otherwise permeable treatment."
+    "semantics": "Each modal filter removes all directed private-car edges represented by its physical street segment. Walking and cycling remain unchanged; emergency passage assumes a removable or otherwise permeable treatment.",
+    "setback_overlap_ineligible_physical_segments": 47,
+    "terminal_zone_ineligible_physical_segments": 80,
+    "terminal_zone_semantics": "Otherwise eligible local segments with display points less than 60 metres from the analysis boundary are ineligible, removing immediate boundary-adjacent filter points from the search. This is an analytical boundary-bias assumption, not public-transport protection or a site-feasibility finding.",
+    "total_setback_ineligible_physical_segments": 112
   },
   "center": [
     24.9535,
@@ -94,8 +154,21 @@
   },
   "portal_policy": {
     "analytical_portal_count": 38,
+    "audited_default_portal_pairs": [
+      {
+        "a": "p-east-01",
+        "b": "p-south-04",
+        "label": "Southern cross-neighbourhood permeability"
+      },
+      {
+        "a": "p-north-03",
+        "b": "p-west-01",
+        "label": "Western cross-neighbourhood permeability"
+      }
+    ],
     "boundary_crossing_count": 68,
     "crossings_retained": "every detected private-car boundary crossing record in the retained graph; each belongs to exactly one analytical portal cluster",
+    "default_pair_selection": "Explicit scenario-specific portal IDs audited against the frozen graph after applying both candidate-setback controls; preprocessing verifies that the IDs remain primary and that each deterministic directional baseline shortest route contains at least one eligible candidate.",
     "display_point": "the member crossing nearest the group centroid",
     "grouping": "deterministic contiguous complete-link clustering within each boundary side",
     "maximum_cluster_diameter_m": 60.0,
@@ -116,24 +189,32 @@
       "unique stable identifiers",
       "all graph references resolve",
       "candidate edges are eligible and unprotected",
+      "candidate display points satisfy the projected analysis-boundary setback",
+      "candidate display points satisfy the primary-portal crossing setback",
+      "terminal-zone ineligibility is distinct from protected transport infrastructure",
+      "primary-portal approach ineligibility is reconstructed from crossing provenance",
       "candidate access penalties match deterministic baseline egress-route provenance",
       "portal and address-cluster graph references resolve",
       "every retained boundary crossing belongs to exactly one diameter-bounded portal",
       "browser export contains exactly two primary portals per boundary side",
       "all included address clusters have permitted portals",
-      "default portal pairs have baseline directed routes",
+      "explicitly audited default portal pairs have candidate-bearing baseline routes in both directions",
       "all exported GeoJSON geometries are non-empty and valid"
     ],
     "counts": {
+      "additional_primary_portal_approach_exclusions": 32,
       "address_clusters": 182,
       "boundary_crossings": 68,
       "buildings": 631,
-      "candidates": 384,
+      "candidates": 272,
       "directed_edges": 2408,
       "nodes": 1342,
       "portals": 38,
+      "primary_portal_approach_ineligible_physical_segments": 79,
       "primary_portals": 8,
-      "protected_features": 678
+      "protected_features": 678,
+      "setback_overlap_ineligible_physical_segments": 47,
+      "terminal_zone_ineligible_physical_segments": 80
     },
     "status": "passed"
   }

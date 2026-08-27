@@ -33,8 +33,9 @@ import networkx as nx
 import pyproj
 import shapely
 from pyproj import Transformer
-from shapely.geometry import LineString, Point, Polygon, box, mapping, shape
-from shapely.ops import transform
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box, mapping, shape
+from shapely.geometry.polygon import orient
+from shapely.ops import transform, unary_union
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO_ID = "helsinki-kallio-vallila"
@@ -52,6 +53,24 @@ DISPLAY_CRS = "EPSG:4326"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 PORTAL_CLUSTER_MAX_DIAMETER_M = 60.0
 PRIMARY_PORTALS_PER_SIDE = 2
+CANDIDATE_BOUNDARY_SETBACK_M = 60.0
+CANDIDATE_BOUNDARY_DISTANCE_METRIC = "projected_candidate_display_point_to_study_boundary"
+PRIMARY_PORTAL_APPROACH_SETBACK_M = 120.0
+PRIMARY_PORTAL_DISTANCE_METRIC = (
+    "projected_candidate_display_point_to_nearest_primary_portal_crossing"
+)
+AUDITED_DEFAULT_PORTAL_PAIRS = (
+    {
+        "a": "p-east-01",
+        "b": "p-south-04",
+        "label": "Southern cross-neighbourhood permeability",
+    },
+    {
+        "a": "p-north-03",
+        "b": "p-west-01",
+        "label": "Western cross-neighbourhood permeability",
+    },
+)
 ACCESS_PENALTY_METRIC = "baseline_shortest_egress_route_cluster_count"
 ACCESS_PENALTY_DEFINITION = (
     "Count of address clusters whose deterministic baseline directed shortest route from the "
@@ -215,6 +234,16 @@ def projection() -> Projection:
 
 def transform_geometry(geometry: Any, transformer: Transformer) -> Any:
     return transform(transformer.transform, geometry)
+
+
+def orient_polygonal(geometry: Any) -> Any:
+    """Apply RFC 7946 winding to polygonal geometry without changing its parts."""
+
+    if geometry.geom_type == "Polygon":
+        return orient(geometry, sign=1.0)
+    if geometry.geom_type == "MultiPolygon":
+        return MultiPolygon([orient(polygon, sign=1.0) for polygon in geometry.geoms])
+    raise ValueError(f"Expected polygonal geometry, got {geometry.geom_type}")
 
 
 def is_inside(coordinate: tuple[float, float]) -> bool:
@@ -388,6 +417,7 @@ def simplify_road_ways(
     boundary_nodes: set[int] = set()
     crossing_records: list[dict[str, Any]] = []
     boundary_wgs = box(*BBOX).boundary
+    boundary_xy = transform_geometry(box(*BBOX), project.forward)
 
     for way in road_ways:
         way_nodes = [int(value) for value in way.get("nodes", [])]
@@ -453,6 +483,8 @@ def simplify_road_ways(
                 line_xy = project.line_xy(coordinates)
                 if line_xy.length < 0.5:
                     continue
+                display_point_xy = line_xy.interpolate(line_xy.length / 2)
+                boundary_distance_m = display_point_xy.distance(boundary_xy.boundary)
                 way_id = int(way["id"])
                 physical_id = f"seg-{way_id}-{subnodes[0]}-{subnodes[-1]}-{ordinal:02d}"
                 major = tags.get("highway") in PROTECTED_HIGHWAYS
@@ -467,13 +499,29 @@ def simplify_road_ways(
                     reason = "Bridge excluded from candidate set"
                 elif tags.get("tunnel") not in {None, "no"}:
                     reason = "Tunnel excluded from candidate set"
-                candidate_eligible = (
+                base_candidate_eligible = (
                     tags.get("highway") in CANDIDATE_HIGHWAYS
                     and not protected
                     and tags.get("bridge") in {None, "no"}
                     and tags.get("tunnel") in {None, "no"}
                     and line_xy.length >= 10
                 )
+                terminal_zone_ineligible = (
+                    base_candidate_eligible and boundary_distance_m < CANDIDATE_BOUNDARY_SETBACK_M
+                )
+                candidate_eligible = base_candidate_eligible and not terminal_zone_ineligible
+                base_candidate_ineligibility_reason = reason
+                candidate_ineligibility_reason = base_candidate_ineligibility_reason
+                if terminal_zone_ineligible:
+                    candidate_ineligibility_reason = (
+                        f"Within the {CANDIDATE_BOUNDARY_SETBACK_M:g} m analysis-boundary "
+                        "terminal zone"
+                    )
+                elif not candidate_eligible and candidate_ineligibility_reason is None:
+                    if tags.get("highway") not in CANDIDATE_HIGHWAYS:
+                        candidate_ineligibility_reason = "Street class excluded from candidate set"
+                    elif line_xy.length < 10:
+                        candidate_ineligibility_reason = "Segment shorter than 10 m"
                 physical_edges.append(
                     {
                         "id": physical_id,
@@ -489,6 +537,19 @@ def simplify_road_ways(
                         "oneway": direction_for_way(tags),
                         "protected": protected,
                         "protection_reason": reason,
+                        "base_candidate_ineligibility_reason": (
+                            base_candidate_ineligibility_reason
+                        ),
+                        "candidate_ineligibility_reason": candidate_ineligibility_reason,
+                        "boundary_distance_m": round(boundary_distance_m, 1),
+                        "boundary_distance_metric": CANDIDATE_BOUNDARY_DISTANCE_METRIC,
+                        "terminal_zone_ineligible": terminal_zone_ineligible,
+                        "nearest_primary_portal_distance_m": None,
+                        "nearest_primary_portal_distance_metric": PRIMARY_PORTAL_DISTANCE_METRIC,
+                        "nearest_primary_portal_id": None,
+                        "nearest_primary_portal_crossing_id": None,
+                        "primary_portal_approach_ineligible": False,
+                        "base_candidate_eligible": base_candidate_eligible,
                         "eligible_candidate": candidate_eligible,
                         "modes": {
                             "private_car": True,
@@ -535,6 +596,86 @@ def simplify_road_ways(
     ]
     crossing_records = [record for record in crossing_records if record["node_id"] in main_nodes]
     return physical_edges, crossing_records
+
+
+def primary_portal_crossing_points(
+    primary_portals: Sequence[dict[str, Any]], project: Projection
+) -> list[dict[str, Any]]:
+    """Return stable projected crossing points for the eight selectable portals."""
+
+    records = [
+        {
+            "portal_id": portal["id"],
+            "crossing_id": crossing["id"],
+            "point_xy": Point(project.forward.transform(*crossing["point"])),
+        }
+        for portal in primary_portals
+        for crossing in portal["member_crossings"]
+    ]
+    records.sort(key=lambda item: (item["portal_id"], item["crossing_id"]))
+    if not records:
+        raise ValueError("Primary portal selection has no crossing points")
+    return records
+
+
+def apply_primary_portal_approach_setback(
+    physical_edges: list[dict[str, Any]],
+    primary_portals: Sequence[dict[str, Any]],
+    project: Projection,
+) -> None:
+    """Exclude base-eligible segment midpoints near any selectable portal crossing.
+
+    The eight primary portals are selected before this rule is applied.  This keeps
+    portal identities stable and prevents the exclusion itself from changing which
+    portals define the exclusion.  Distances are Euclidean in EPSG:3067 and use the
+    actual member crossing points, never the portal's display marker or centroid.
+    """
+
+    crossing_points = primary_portal_crossing_points(primary_portals, project)
+    for physical in sorted(physical_edges, key=lambda item: item["id"]):
+        line = physical["geometry_xy"]
+        midpoint = line.interpolate(line.length / 2)
+        nearest = min(
+            crossing_points,
+            key=lambda item: (
+                midpoint.distance(item["point_xy"]),
+                item["portal_id"],
+                item["crossing_id"],
+            ),
+        )
+        distance_m = midpoint.distance(nearest["point_xy"])
+        approach_ineligible = bool(
+            physical["base_candidate_eligible"] and distance_m < PRIMARY_PORTAL_APPROACH_SETBACK_M
+        )
+        terminal_ineligible = bool(physical["terminal_zone_ineligible"])
+        physical["nearest_primary_portal_distance_m"] = round(distance_m, 1)
+        physical["nearest_primary_portal_distance_metric"] = PRIMARY_PORTAL_DISTANCE_METRIC
+        physical["nearest_primary_portal_id"] = nearest["portal_id"]
+        physical["nearest_primary_portal_crossing_id"] = nearest["crossing_id"]
+        physical["primary_portal_approach_ineligible"] = approach_ineligible
+        physical["eligible_candidate"] = bool(
+            physical["base_candidate_eligible"]
+            and not terminal_ineligible
+            and not approach_ineligible
+        )
+        if not physical["base_candidate_eligible"]:
+            continue
+        if terminal_ineligible and approach_ineligible:
+            physical["candidate_ineligibility_reason"] = (
+                f"Within both the {CANDIDATE_BOUNDARY_SETBACK_M:g} m analysis-boundary "
+                f"terminal zone and the {PRIMARY_PORTAL_APPROACH_SETBACK_M:g} m primary-portal "
+                "approach zone"
+            )
+        elif terminal_ineligible:
+            physical["candidate_ineligibility_reason"] = (
+                f"Within the {CANDIDATE_BOUNDARY_SETBACK_M:g} m analysis-boundary terminal zone"
+            )
+        elif approach_ineligible:
+            physical["candidate_ineligibility_reason"] = (
+                f"Within the {PRIMARY_PORTAL_APPROACH_SETBACK_M:g} m primary-portal approach zone"
+            )
+        else:
+            physical["candidate_ineligibility_reason"] = None
 
 
 def directed_graph_data(
@@ -596,6 +737,24 @@ def directed_graph_data(
                     "candidate_id": candidate_id,
                     "protected": physical["protected"],
                     "protection_reason": physical["protection_reason"],
+                    "candidate_ineligibility_reason": physical["candidate_ineligibility_reason"],
+                    "boundary_distance_m": physical["boundary_distance_m"],
+                    "boundary_distance_metric": physical["boundary_distance_metric"],
+                    "terminal_zone_ineligible": physical["terminal_zone_ineligible"],
+                    "nearest_primary_portal_distance_m": physical[
+                        "nearest_primary_portal_distance_m"
+                    ],
+                    "nearest_primary_portal_distance_metric": physical[
+                        "nearest_primary_portal_distance_metric"
+                    ],
+                    "nearest_primary_portal_id": physical["nearest_primary_portal_id"],
+                    "nearest_primary_portal_crossing_id": physical[
+                        "nearest_primary_portal_crossing_id"
+                    ],
+                    "primary_portal_approach_ineligible": physical[
+                        "primary_portal_approach_ineligible"
+                    ],
+                    "base_candidate_eligible": physical["base_candidate_eligible"],
                     "modes": physical["modes"],
                     "geometry": geometry,
                 }
@@ -635,11 +794,54 @@ def directed_graph_data(
                     "cost": cost,
                     "access_penalty": 0,
                     "eligible": True,
+                    "eligible_candidate": True,
+                    "base_candidate_eligible": True,
+                    "candidate_ineligibility_reason": None,
+                    "boundary_distance_m": physical["boundary_distance_m"],
+                    "boundary_distance_metric": physical["boundary_distance_metric"],
+                    "terminal_zone_ineligible": False,
+                    "nearest_primary_portal_distance_m": physical[
+                        "nearest_primary_portal_distance_m"
+                    ],
+                    "nearest_primary_portal_distance_metric": physical[
+                        "nearest_primary_portal_distance_metric"
+                    ],
+                    "nearest_primary_portal_id": physical["nearest_primary_portal_id"],
+                    "nearest_primary_portal_crossing_id": physical[
+                        "nearest_primary_portal_crossing_id"
+                    ],
+                    "primary_portal_approach_ineligible": False,
                     "blocks_modes": ["private_car"],
                     "passes_modes": ["walking", "cycling", "emergency"],
                 }
             )
     return solver_nodes, directed_edges, candidates
+
+
+def annotate_portal_adjacency(
+    portals: Sequence[dict[str, Any]], physical_edges: Sequence[dict[str, Any]]
+) -> None:
+    """Refresh portal-neighbour provenance after each candidate-policy stage."""
+
+    incident: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in physical_edges:
+        incident[f"n{edge['u_osm']}"].append(edge)
+        incident[f"n{edge['v_osm']}"].append(edge)
+    for portal in portals:
+        adjacent = [edge for node_id in portal["node_ids"] for edge in incident[node_id]]
+        portal["adjacent_candidate_ids"] = sorted(
+            {edge["candidate_id"] for edge in adjacent if edge.get("candidate_id")}
+        )
+        portal["adjacent_local_candidate_segment_ids"] = sorted(
+            {edge["id"] for edge in adjacent if edge.get("base_candidate_eligible")}
+        )
+        portal["adjacent_terminal_zone_segment_ids"] = sorted(
+            {edge["id"] for edge in adjacent if edge.get("terminal_zone_ineligible")}
+        )
+        portal["adjacent_primary_portal_approach_segment_ids"] = sorted(
+            {edge["id"] for edge in adjacent if edge.get("primary_portal_approach_ineligible")}
+        )
+        portal["adjacent_protected"] = any(edge["protected"] for edge in adjacent)
 
 
 def cluster_portals(
@@ -753,18 +955,9 @@ def cluster_portals(
                 }
             )
 
-    # Record how selectable each portal's immediate graph neighbourhood is.  This
-    # supports deterministic default-pair selection without changing semantics.
-    incident: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for edge in physical_edges:
-        incident[f"n{edge['u_osm']}"].append(edge)
-        incident[f"n{edge['v_osm']}"].append(edge)
-    for portal in clusters:
-        adjacent = [edge for node_id in portal["node_ids"] for edge in incident[node_id]]
-        portal["adjacent_candidate_ids"] = sorted(
-            {edge["candidate_id"] for edge in adjacent if edge.get("candidate_id")}
-        )
-        portal["adjacent_protected"] = any(edge["protected"] for edge in adjacent)
+    # Selectable portals are ranked from pre-approach-setback local eligibility.
+    # This prevents the analytical anti-cap rule from changing the IDs that define it.
+    annotate_portal_adjacency(clusters, physical_edges)
     return (
         sorted(clusters, key=lambda item: (item["direction"], item["id"])),
         sorted(crossing_exports, key=lambda item: item["id"]),
@@ -812,7 +1005,7 @@ def select_primary_portals(
             coordinate = project.point_xy(portal["group_centroid"])[axis_index]
             return (
                 not named_local,
-                not bool(portal["adjacent_candidate_ids"]),
+                not bool(portal["adjacent_local_candidate_segment_ids"]),
                 bool(portal["adjacent_protected"]),
                 abs(coordinate - target),
                 portal["maximum_diameter_m"],
@@ -1079,44 +1272,40 @@ def default_portal_pairs(
     nodes: Sequence[dict[str, Any]],
     edges: Sequence[dict[str, Any]],
 ) -> list[dict[str, str]]:
-    by_side: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for portal in portals:
-        by_side[portal["direction"]].append(portal)
+    """Return the scenario's explicitly audited, non-terminal default pairs.
 
-    def rank(portal: dict[str, Any]) -> tuple[Any, ...]:
-        # Prefer a single, selectable local ingress and avoid protected arteries.
-        point = portal["point"]
-        axis_distance = abs(point[0] - CENTER[0]) + abs(point[1] - CENTER[1])
-        return (
-            not bool(portal["adjacent_candidate_ids"]),
-            bool(portal["adjacent_protected"]),
-            len(portal["node_ids"]),
-            len(portal["adjacent_candidate_ids"]),
-            axis_distance,
-            portal["id"],
-        )
+    Automatic ranking previously favoured portal throats that could be capped by a
+    filter almost on the analysis boundary.  The audited IDs below stay stable with
+    the frozen snapshot, while these checks ensure preprocessing fails loudly if a
+    future source refresh changes their primary status or removes every candidate
+    from either directional baseline shortest route. Full feasibility is established
+    later by the solver and independent graph verifier, not by this route audit.
+    """
 
+    portal_by_id = {portal["id"]: portal for portal in portals}
     result: list[dict[str, str]] = []
-    for first_side, second_side, label in (
-        ("north", "south", "North ↔ south permeability"),
-        ("west", "east", "West ↔ east permeability"),
-    ):
-        candidates_a = sorted(by_side[first_side], key=rank)
-        candidates_b = sorted(by_side[second_side], key=rank)
-        selected = None
-        for portal_a in candidates_a:
-            for portal_b in candidates_b:
-                forward = shortest_route(nodes, edges, portal_a["node_ids"], portal_b["node_ids"])
-                reverse = shortest_route(nodes, edges, portal_b["node_ids"], portal_a["node_ids"])
-                if forward and reverse and forward["candidate_ids"] and reverse["candidate_ids"]:
-                    selected = (portal_a, portal_b)
-                    break
-            if selected:
-                break
-        if selected:
-            result.append({"a": selected[0]["id"], "b": selected[1]["id"], "label": label})
-    if len(result) < 2:
-        raise ValueError("Could not choose two connected, blockable opposing default portal pairs")
+    for pair in AUDITED_DEFAULT_PORTAL_PAIRS:
+        portal_a = portal_by_id.get(pair["a"])
+        portal_b = portal_by_id.get(pair["b"])
+        if portal_a is None or portal_b is None:
+            raise ValueError(f"Audited default portal pair is missing: {pair['a']} ↔ {pair['b']}")
+        if not portal_a.get("primary") or not portal_b.get("primary"):
+            raise ValueError(
+                f"Audited default portal pair is no longer primary: {pair['a']} ↔ {pair['b']}"
+            )
+        forward = shortest_route(nodes, edges, portal_a["node_ids"], portal_b["node_ids"])
+        reverse = shortest_route(nodes, edges, portal_b["node_ids"], portal_a["node_ids"])
+        if (
+            not forward
+            or not reverse
+            or not forward["candidate_ids"]
+            or not reverse["candidate_ids"]
+        ):
+            raise ValueError(
+                "Audited default pair lacks a candidate-bearing baseline route in "
+                f"both directions: {pair['a']} ↔ {pair['b']}"
+            )
+        result.append(dict(pair))
     return result
 
 
@@ -1176,6 +1365,18 @@ def street_features(physical_edges: Sequence[dict[str, Any]]) -> list[dict[str, 
                 "oneway": edge["oneway"] != "both",
                 "protected": edge["protected"],
                 "eligible_candidate": edge["eligible_candidate"],
+                "candidate_ineligibility_reason": edge["candidate_ineligibility_reason"],
+                "boundary_distance_m": edge["boundary_distance_m"],
+                "boundary_distance_metric": edge["boundary_distance_metric"],
+                "terminal_zone_ineligible": edge["terminal_zone_ineligible"],
+                "nearest_primary_portal_distance_m": edge["nearest_primary_portal_distance_m"],
+                "nearest_primary_portal_distance_metric": edge[
+                    "nearest_primary_portal_distance_metric"
+                ],
+                "nearest_primary_portal_id": edge["nearest_primary_portal_id"],
+                "nearest_primary_portal_crossing_id": edge["nearest_primary_portal_crossing_id"],
+                "primary_portal_approach_ineligible": edge["primary_portal_approach_ineligible"],
+                "base_candidate_eligible": edge["base_candidate_eligible"],
                 "length_m": edge["length_m"],
             },
             "geometry": {"type": "LineString", "coordinates": edge["geometry"]},
@@ -1240,6 +1441,34 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
     address_clusters = set(address_cluster_ids)
     crossings = set(crossing_ids)
     expected_candidate_usage: dict[str, list[str]] = defaultdict(list)
+    validation_projection = projection()
+    analysis_polygon_xy = transform_geometry(
+        shape(scenario["boundary"]["geometry"]), validation_projection.forward
+    )
+    analysis_boundary_xy = analysis_polygon_xy.boundary
+    primary_portal_records = [
+        portal_by_id[portal_id] for portal_id in primary_portal_ids if portal_id in portal_by_id
+    ]
+    primary_crossing_points = primary_portal_crossing_points(
+        primary_portal_records, validation_projection
+    )
+    primary_crossing_by_id = {record["crossing_id"]: record for record in primary_crossing_points}
+    primary_crossing_ids = sorted(primary_crossing_by_id)
+    candidate_policy = solver.get("metadata", {}).get("candidate_policy", {})
+    if candidate_policy.get("analysis_boundary_setback_m") != CANDIDATE_BOUNDARY_SETBACK_M:
+        errors.append("candidate-policy boundary setback disagrees with the build constant")
+    if candidate_policy.get("boundary_distance_metric") != CANDIDATE_BOUNDARY_DISTANCE_METRIC:
+        errors.append("candidate-policy boundary metric disagrees with the build constant")
+    if (
+        candidate_policy.get("primary_portal_approach_setback_m")
+        != PRIMARY_PORTAL_APPROACH_SETBACK_M
+    ):
+        errors.append("candidate-policy portal setback disagrees with the build constant")
+    if (
+        candidate_policy.get("nearest_primary_portal_distance_metric")
+        != PRIMARY_PORTAL_DISTANCE_METRIC
+    ):
+        errors.append("candidate-policy portal metric disagrees with the build constant")
     for cluster in solver["address_clusters"]:
         baseline = cluster.get("baseline_egress", {})
         permitted_target_nodes = {
@@ -1290,9 +1519,91 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             errors.append(f"edge {edge['id']} references missing candidate")
         if edge["protected"] and candidate_id:
             errors.append(f"protected edge {edge['id']} is selectable")
+        if edge.get("boundary_distance_metric") != CANDIDATE_BOUNDARY_DISTANCE_METRIC:
+            errors.append(f"edge {edge['id']} has an invalid boundary-distance metric")
         geometry = shape({"type": "LineString", "coordinates": edge["geometry"]})
         if not geometry.is_valid or geometry.is_empty:
             errors.append(f"edge {edge['id']} has invalid geometry")
+            continue
+        geometry_xy = transform_geometry(geometry, validation_projection.forward)
+        midpoint_xy = geometry_xy.interpolate(geometry_xy.length / 2)
+        reconstructed_boundary_distance = midpoint_xy.distance(analysis_boundary_xy)
+        if abs(float(edge.get("boundary_distance_m", -1)) - reconstructed_boundary_distance) > 0.2:
+            errors.append(f"edge {edge['id']} boundary-distance provenance disagrees")
+        nearest_primary = min(
+            primary_crossing_points,
+            key=lambda item: (
+                midpoint_xy.distance(item["point_xy"]),
+                item["portal_id"],
+                item["crossing_id"],
+            ),
+        )
+        reconstructed_primary_distance = midpoint_xy.distance(nearest_primary["point_xy"])
+        if edge.get("nearest_primary_portal_distance_metric") != PRIMARY_PORTAL_DISTANCE_METRIC:
+            errors.append(f"edge {edge['id']} has an invalid primary-portal distance metric")
+        if (
+            abs(
+                float(edge.get("nearest_primary_portal_distance_m", -1))
+                - reconstructed_primary_distance
+            )
+            > 0.2
+        ):
+            errors.append(f"edge {edge['id']} primary-portal distance provenance disagrees")
+        if edge.get("nearest_primary_portal_id") != nearest_primary["portal_id"]:
+            errors.append(f"edge {edge['id']} has the wrong nearest primary portal")
+        if edge.get("nearest_primary_portal_crossing_id") != nearest_primary["crossing_id"]:
+            errors.append(f"edge {edge['id']} has the wrong nearest primary crossing")
+        expected_terminal_ineligible = bool(
+            edge.get("base_candidate_eligible")
+            and reconstructed_boundary_distance < CANDIDATE_BOUNDARY_SETBACK_M
+        )
+        expected_approach_ineligible = bool(
+            edge.get("base_candidate_eligible")
+            and reconstructed_primary_distance < PRIMARY_PORTAL_APPROACH_SETBACK_M
+        )
+        if bool(edge.get("terminal_zone_ineligible")) != expected_terminal_ineligible:
+            errors.append(f"edge {edge['id']} has the wrong terminal-zone flag")
+        if bool(edge.get("primary_portal_approach_ineligible")) != expected_approach_ineligible:
+            errors.append(f"edge {edge['id']} has the wrong portal-approach flag")
+        if edge.get("terminal_zone_ineligible"):
+            if candidate_id or edge["protected"]:
+                errors.append(
+                    f"terminal-zone edge {edge['id']} is selectable or mislabelled protected"
+                )
+            if float(edge.get("boundary_distance_m", math.inf)) >= (
+                CANDIDATE_BOUNDARY_SETBACK_M + 0.1
+            ):
+                errors.append(f"terminal-zone edge {edge['id']} lies outside the setback")
+            if "analysis-boundary terminal zone" not in str(
+                edge.get("candidate_ineligibility_reason")
+            ):
+                errors.append(f"terminal-zone edge {edge['id']} lacks its ineligibility reason")
+        if edge.get("primary_portal_approach_ineligible"):
+            if candidate_id or edge["protected"]:
+                errors.append(
+                    f"portal-approach edge {edge['id']} is selectable or mislabelled protected"
+                )
+            if float(edge.get("nearest_primary_portal_distance_m", math.inf)) >= (
+                PRIMARY_PORTAL_APPROACH_SETBACK_M + 0.1
+            ):
+                errors.append(f"portal-approach edge {edge['id']} lies outside the setback")
+            if "primary-portal approach zone" not in str(
+                edge.get("candidate_ineligibility_reason")
+            ):
+                errors.append(f"portal-approach edge {edge['id']} lacks its ineligibility reason")
+        expected_candidate = bool(
+            edge.get("base_candidate_eligible")
+            and not expected_terminal_ineligible
+            and not expected_approach_ineligible
+        )
+        if bool(candidate_id) != expected_candidate:
+            errors.append(f"edge {edge['id']} has inconsistent final candidate eligibility")
+        if not edge.get("base_candidate_eligible") and (
+            candidate_id
+            or edge.get("terminal_zone_ineligible")
+            or edge.get("primary_portal_approach_ineligible")
+        ):
+            errors.append(f"base-ineligible edge {edge['id']} has candidate eligibility")
     for candidate in candidates.values():
         if not candidate["edge_ids"]:
             errors.append(f"candidate {candidate['id']} has no directed edge")
@@ -1301,8 +1612,86 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
                 errors.append(f"candidate {candidate['id']} references missing edge {edge_id}")
             elif edges[edge_id]["protected"]:
                 errors.append(f"candidate {candidate['id']} references protected edge {edge_id}")
+            elif edges[edge_id].get("boundary_distance_m") != candidate.get(
+                "boundary_distance_m"
+            ) or edges[edge_id].get("boundary_distance_metric") != candidate.get(
+                "boundary_distance_metric"
+            ):
+                errors.append(
+                    f"candidate {candidate['id']} boundary distance differs from edge {edge_id}"
+                )
+            elif any(
+                edges[edge_id].get(field) != candidate.get(field)
+                for field in (
+                    "candidate_ineligibility_reason",
+                    "terminal_zone_ineligible",
+                    "nearest_primary_portal_distance_m",
+                    "nearest_primary_portal_distance_metric",
+                    "nearest_primary_portal_id",
+                    "nearest_primary_portal_crossing_id",
+                    "primary_portal_approach_ineligible",
+                    "base_candidate_eligible",
+                )
+            ):
+                errors.append(
+                    f"candidate {candidate['id']} primary-portal provenance differs from "
+                    f"edge {edge_id}"
+                )
         if not shape(candidate["cross_geometry"]).is_valid:
             errors.append(f"candidate {candidate['id']} has invalid cross geometry")
+        if candidate.get("boundary_distance_metric") != CANDIDATE_BOUNDARY_DISTANCE_METRIC:
+            errors.append(f"candidate {candidate['id']} has an invalid boundary-distance metric")
+        exported_distance = float(candidate.get("boundary_distance_m", -1))
+        candidate_point_xy = transform_geometry(
+            Point(candidate["display_point"]), validation_projection.forward
+        )
+        reconstructed_distance = candidate_point_xy.distance(analysis_boundary_xy)
+        if exported_distance < CANDIDATE_BOUNDARY_SETBACK_M:
+            errors.append(f"candidate {candidate['id']} violates the boundary setback")
+        if abs(exported_distance - reconstructed_distance) > 0.2:
+            errors.append(f"candidate {candidate['id']} boundary-distance provenance disagrees")
+        nearest_primary = min(
+            primary_crossing_points,
+            key=lambda item: (
+                candidate_point_xy.distance(item["point_xy"]),
+                item["portal_id"],
+                item["crossing_id"],
+            ),
+        )
+        reconstructed_primary_distance = candidate_point_xy.distance(nearest_primary["point_xy"])
+        if (
+            candidate.get("nearest_primary_portal_distance_metric")
+            != PRIMARY_PORTAL_DISTANCE_METRIC
+        ):
+            errors.append(
+                f"candidate {candidate['id']} has an invalid primary-portal distance metric"
+            )
+        if (
+            abs(
+                float(candidate.get("nearest_primary_portal_distance_m", -1))
+                - reconstructed_primary_distance
+            )
+            > 0.2
+        ):
+            errors.append(
+                f"candidate {candidate['id']} primary-portal distance provenance disagrees"
+            )
+        if candidate.get("nearest_primary_portal_id") != nearest_primary["portal_id"]:
+            errors.append(f"candidate {candidate['id']} has the wrong nearest primary portal")
+        if candidate.get("nearest_primary_portal_crossing_id") != nearest_primary["crossing_id"]:
+            errors.append(f"candidate {candidate['id']} has the wrong nearest primary crossing")
+        if reconstructed_primary_distance < PRIMARY_PORTAL_APPROACH_SETBACK_M:
+            errors.append(f"candidate {candidate['id']} violates the primary-portal setback")
+        if candidate.get("primary_portal_approach_ineligible") is not False:
+            errors.append(f"candidate {candidate['id']} carries an ineligibility flag")
+        if (
+            candidate.get("eligible") is not True
+            or candidate.get("eligible_candidate") is not True
+            or candidate.get("base_candidate_eligible") is not True
+            or candidate.get("terminal_zone_ineligible") is not False
+            or candidate.get("candidate_ineligibility_reason") is not None
+        ):
+            errors.append(f"candidate {candidate['id']} has inconsistent eligibility flags")
         penalty_cluster_ids = list(candidate.get("access_penalty_cluster_ids", []))
         if candidate.get("access_penalty_metric") != ACCESS_PENALTY_METRIC:
             errors.append(f"candidate {candidate['id']} has an invalid access penalty metric")
@@ -1324,6 +1713,52 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             errors.append(f"portal {portal['id']} repeats a boundary crossing")
         if not set(member_ids).issubset(crossings):
             errors.append(f"portal {portal['id']} references a missing boundary crossing")
+        for field in (
+            "adjacent_candidate_ids",
+            "adjacent_local_candidate_segment_ids",
+            "adjacent_terminal_zone_segment_ids",
+            "adjacent_primary_portal_approach_segment_ids",
+        ):
+            values = list(portal.get(field, []))
+            if len(values) != len(set(values)):
+                errors.append(f"portal {portal['id']} repeats {field}")
+        if not set(portal.get("adjacent_candidate_ids", [])).issubset(candidates):
+            errors.append(f"portal {portal['id']} references an unknown adjacent candidate")
+        portal_nodes = set(portal["node_ids"])
+        adjacent_edges = [
+            edge
+            for edge in solver["edges"]
+            if edge["u"] in portal_nodes or edge["v"] in portal_nodes
+        ]
+        expected_adjacency = {
+            "adjacent_candidate_ids": sorted(
+                {edge["candidate_id"] for edge in adjacent_edges if edge.get("candidate_id")}
+            ),
+            "adjacent_local_candidate_segment_ids": sorted(
+                {
+                    edge["physical_id"]
+                    for edge in adjacent_edges
+                    if edge.get("base_candidate_eligible")
+                }
+            ),
+            "adjacent_terminal_zone_segment_ids": sorted(
+                {
+                    edge["physical_id"]
+                    for edge in adjacent_edges
+                    if edge.get("terminal_zone_ineligible")
+                }
+            ),
+            "adjacent_primary_portal_approach_segment_ids": sorted(
+                {
+                    edge["physical_id"]
+                    for edge in adjacent_edges
+                    if edge.get("primary_portal_approach_ineligible")
+                }
+            ),
+        }
+        for field, expected_values in expected_adjacency.items():
+            if portal.get(field) != expected_values:
+                errors.append(f"portal {portal['id']} has stale {field}")
     portal_crossing_ids = [
         crossing_id for portal in solver["portals"] for crossing_id in portal["crossing_ids"]
     ]
@@ -1375,9 +1810,16 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
         portal["id"] for portal in solver["portals"] if portal.get("primary")
     }:
         errors.append("primary portal IDs and portal flags disagree")
+    if candidate_policy.get("primary_portal_approach_source_portal_ids") != primary_portal_ids:
+        errors.append("primary-portal setback metadata portal IDs disagree")
+    if candidate_policy.get("primary_portal_approach_source_crossing_ids") != primary_crossing_ids:
+        errors.append("primary-portal setback metadata crossing IDs disagree")
     browser_portal_ids = [portal["id"] for portal in scenario.get("portals", [])]
     if browser_portal_ids != primary_portal_ids:
         errors.append("browser portal export does not exactly match primary portal IDs")
+    browser_candidate_ids = [candidate["id"] for candidate in scenario.get("candidates", [])]
+    if browser_candidate_ids != candidate_ids:
+        errors.append("browser candidate export does not exactly match solver candidate IDs")
     for cluster in solver["address_clusters"]:
         if cluster["node_id"] not in nodes:
             errors.append(f"address cluster {cluster['id']} has invalid snap node")
@@ -1385,6 +1827,10 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             errors.append(f"address cluster {cluster['id']} has no permitted portal")
         if not set(cluster["allowed_portal_ids"]).issubset(portals):
             errors.append(f"address cluster {cluster['id']} has invalid permitted portal")
+    if solver["defaults"]["portal_pairs"] != [dict(pair) for pair in AUDITED_DEFAULT_PORTAL_PAIRS]:
+        errors.append("default portal pairs differ from the explicitly audited pair set")
+    if scenario.get("default_portal_pairs") != solver["defaults"]["portal_pairs"]:
+        errors.append("browser and solver default portal pairs disagree")
     for pair in solver["defaults"]["portal_pairs"]:
         if pair["a"] not in portals or pair["b"] not in portals:
             errors.append("default pair references missing portal")
@@ -1392,15 +1838,194 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             errors.append("default pair references a non-primary portal")
         portal_a = next(item for item in solver["portals"] if item["id"] == pair["a"])
         portal_b = next(item for item in solver["portals"] if item["id"] == pair["b"])
-        if not shortest_route(
+        forward = shortest_route(
             solver["nodes"], solver["edges"], portal_a["node_ids"], portal_b["node_ids"]
-        ):
-            errors.append(f"default pair {pair['a']} ↔ {pair['b']} has no baseline route")
+        )
+        reverse = shortest_route(
+            solver["nodes"], solver["edges"], portal_b["node_ids"], portal_a["node_ids"]
+        )
+        if not forward or not reverse:
+            errors.append(
+                f"default pair {pair['a']} ↔ {pair['b']} lacks a bidirectional baseline route"
+            )
+        elif not forward["candidate_ids"] or not reverse["candidate_ids"]:
+            errors.append(
+                f"default pair {pair['a']} ↔ {pair['b']} has a candidate-free baseline route"
+            )
     for collection_name in ("streets", "buildings", "protected_corridors"):
         for feature in scenario[collection_name]["features"]:
             geometry = shape(feature["geometry"])
             if geometry.is_empty or not geometry.is_valid:
                 errors.append(f"{collection_name} feature {feature.get('id')} is invalid")
+    edges_by_physical_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in solver["edges"]:
+        edges_by_physical_id[edge["physical_id"]].append(edge)
+    street_features_by_id = {
+        feature["properties"]["id"]: feature for feature in scenario["streets"]["features"]
+    }
+    if len(street_features_by_id) != len(scenario["streets"]["features"]):
+        errors.append("browser street features repeat physical IDs")
+    if set(street_features_by_id) != set(edges_by_physical_id):
+        errors.append("browser street and solver physical-edge IDs disagree")
+    provenance_fields = (
+        "candidate_id",
+        "eligible_candidate",
+        "candidate_ineligibility_reason",
+        "boundary_distance_m",
+        "boundary_distance_metric",
+        "terminal_zone_ineligible",
+        "nearest_primary_portal_distance_m",
+        "nearest_primary_portal_distance_metric",
+        "nearest_primary_portal_id",
+        "nearest_primary_portal_crossing_id",
+        "primary_portal_approach_ineligible",
+        "base_candidate_eligible",
+    )
+    for physical_id, feature in sorted(street_features_by_id.items()):
+        matching_edges = edges_by_physical_id.get(physical_id, [])
+        if not matching_edges:
+            continue
+        representative = matching_edges[0]
+        properties = feature["properties"]
+        for field in provenance_fields:
+            if properties.get(field) != representative.get(field):
+                errors.append(f"street {physical_id} differs from solver edge on {field}")
+        if set(properties.get("edge_ids", [])) != {edge["id"] for edge in matching_edges}:
+            errors.append(f"street {physical_id} directed-edge references disagree")
+        street_geometry_xy = transform_geometry(
+            shape(feature["geometry"]), validation_projection.forward
+        )
+        street_midpoint_xy = street_geometry_xy.interpolate(street_geometry_xy.length / 2)
+        nearest_primary = min(
+            primary_crossing_points,
+            key=lambda item: (
+                street_midpoint_xy.distance(item["point_xy"]),
+                item["portal_id"],
+                item["crossing_id"],
+            ),
+        )
+        if (
+            abs(
+                float(properties.get("nearest_primary_portal_distance_m", -1))
+                - street_midpoint_xy.distance(nearest_primary["point_xy"])
+            )
+            > 0.2
+        ):
+            errors.append(f"street {physical_id} primary-portal distance provenance disagrees")
+        if properties.get("nearest_primary_portal_id") != nearest_primary["portal_id"]:
+            errors.append(f"street {physical_id} has the wrong nearest primary portal")
+        if properties.get("nearest_primary_portal_crossing_id") != nearest_primary["crossing_id"]:
+            errors.append(f"street {physical_id} has the wrong nearest primary crossing")
+    terminal_zone = scenario.get("terminal_zone")
+    if not terminal_zone:
+        errors.append("browser export is missing the candidate terminal zone")
+    else:
+        terminal_geometry = shape(terminal_zone["geometry"])
+        if terminal_geometry.is_empty or not terminal_geometry.is_valid:
+            errors.append("candidate terminal-zone geometry is empty or invalid")
+        if float(terminal_zone.get("properties", {}).get("setback_m", -1)) != (
+            CANDIDATE_BOUNDARY_SETBACK_M
+        ):
+            errors.append("candidate terminal-zone feature has the wrong setback")
+        if terminal_zone.get("properties", {}).get("protected") is not False:
+            errors.append("candidate terminal zone is incorrectly labelled protected")
+        terminal_geometry_xy = transform_geometry(terminal_geometry, validation_projection.forward)
+        expected_terminal_geometry_xy = analysis_polygon_xy.difference(
+            analysis_polygon_xy.buffer(-CANDIDATE_BOUNDARY_SETBACK_M, join_style="mitre")
+        )
+        if terminal_geometry_xy.hausdorff_distance(expected_terminal_geometry_xy) > 0.05:
+            errors.append("candidate terminal-zone geometry disagrees with the configured setback")
+        terminal_polygons = (
+            [terminal_geometry]
+            if terminal_geometry.geom_type == "Polygon"
+            else list(terminal_geometry.geoms)
+        )
+        if any(
+            not polygon.exterior.is_ccw or any(ring.is_ccw for ring in polygon.interiors)
+            for polygon in terminal_polygons
+        ):
+            errors.append("candidate terminal-zone rings do not follow RFC 7946 winding")
+    portal_approach_zones = scenario.get("portal_approach_zones")
+    if not portal_approach_zones:
+        errors.append("browser export is missing the primary-portal approach zones")
+    else:
+        approach_properties = portal_approach_zones.get("properties", {})
+        approach_geometry = shape(portal_approach_zones["geometry"])
+        if approach_geometry.is_empty or not approach_geometry.is_valid:
+            errors.append("primary-portal approach-zone geometry is empty or invalid")
+        if float(approach_properties.get("setback_m", -1)) != (PRIMARY_PORTAL_APPROACH_SETBACK_M):
+            errors.append("primary-portal approach-zone feature has the wrong setback")
+        if (
+            approach_properties.get("nearest_primary_portal_distance_metric")
+            != PRIMARY_PORTAL_DISTANCE_METRIC
+        ):
+            errors.append("primary-portal approach-zone feature has the wrong metric")
+        if approach_properties.get("primary_portal_ids") != primary_portal_ids:
+            errors.append("primary-portal approach-zone portal IDs disagree")
+        if approach_properties.get("primary_portal_crossing_ids") != primary_crossing_ids:
+            errors.append("primary-portal approach-zone crossing IDs disagree")
+        if approach_properties.get("protected") is not False:
+            errors.append("primary-portal approach zones are incorrectly labelled protected")
+        approach_geometry_xy = transform_geometry(approach_geometry, validation_projection.forward)
+        expected_approach_geometry_xy = unary_union(
+            [
+                record["point_xy"].buffer(PRIMARY_PORTAL_APPROACH_SETBACK_M)
+                for record in primary_crossing_points
+            ]
+        ).intersection(analysis_polygon_xy)
+        if approach_geometry_xy.hausdorff_distance(expected_approach_geometry_xy) > 0.05:
+            errors.append("primary-portal approach-zone geometry disagrees with its sources")
+        if approach_geometry_xy.symmetric_difference(expected_approach_geometry_xy).area > 0.5:
+            errors.append("primary-portal approach-zone area cannot be reconstructed")
+        approach_polygons = (
+            [approach_geometry]
+            if approach_geometry.geom_type == "Polygon"
+            else list(approach_geometry.geoms)
+        )
+        if any(
+            not polygon.exterior.is_ccw or any(ring.is_ccw for ring in polygon.interiors)
+            for polygon in approach_polygons
+        ):
+            errors.append("primary-portal approach-zone rings do not follow RFC 7946 winding")
+    terminal_physical_ids = {
+        edge["physical_id"] for edge in solver["edges"] if edge.get("terminal_zone_ineligible")
+    }
+    metadata_terminal_count = (
+        solver.get("metadata", {})
+        .get("candidate_policy", {})
+        .get("terminal_zone_ineligible_physical_segments")
+    )
+    if metadata_terminal_count != len(terminal_physical_ids):
+        errors.append("terminal-zone metadata count disagrees with solver edges")
+    approach_physical_ids = {
+        edge["physical_id"]
+        for edge in solver["edges"]
+        if edge.get("primary_portal_approach_ineligible")
+    }
+    overlap_physical_ids = terminal_physical_ids & approach_physical_ids
+    additional_approach_physical_ids = approach_physical_ids - terminal_physical_ids
+    candidate_physical_ids = {candidate["physical_id"] for candidate in solver["candidates"]}
+    base_eligible_physical_ids = {
+        edge["physical_id"] for edge in solver["edges"] if edge.get("base_candidate_eligible")
+    }
+    expected_metadata_counts = {
+        "base_eligible_physical_segments": len(base_eligible_physical_ids),
+        "terminal_zone_ineligible_physical_segments": len(terminal_physical_ids),
+        "primary_portal_approach_ineligible_physical_segments": len(approach_physical_ids),
+        "setback_overlap_ineligible_physical_segments": len(overlap_physical_ids),
+        "additional_primary_portal_approach_exclusions": len(additional_approach_physical_ids),
+        "total_setback_ineligible_physical_segments": len(
+            terminal_physical_ids | approach_physical_ids
+        ),
+        "eligible_candidate_physical_segments": len(candidate_physical_ids),
+    }
+    for field, expected_count in expected_metadata_counts.items():
+        if candidate_policy.get(field) != expected_count:
+            errors.append(f"candidate-policy metadata count {field} disagrees")
+    if base_eligible_physical_ids != (
+        terminal_physical_ids | approach_physical_ids | candidate_physical_ids
+    ):
+        errors.append("base-eligible segments do not partition into setbacks and candidates")
     if errors:
         raise ValueError("Scenario validation failed:\n- " + "\n- ".join(errors[:50]))
     return {
@@ -1409,12 +2034,19 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             "unique stable identifiers",
             "all graph references resolve",
             "candidate edges are eligible and unprotected",
+            "candidate display points satisfy the projected analysis-boundary setback",
+            "candidate display points satisfy the primary-portal crossing setback",
+            "terminal-zone ineligibility is distinct from protected transport infrastructure",
+            "primary-portal approach ineligibility is reconstructed from crossing provenance",
             "candidate access penalties match deterministic baseline egress-route provenance",
             "portal and address-cluster graph references resolve",
             "every retained boundary crossing belongs to exactly one diameter-bounded portal",
             "browser export contains exactly two primary portals per boundary side",
             "all included address clusters have permitted portals",
-            "default portal pairs have baseline directed routes",
+            (
+                "explicitly audited default portal pairs have candidate-bearing baseline "
+                "routes in both directions"
+            ),
             "all exported GeoJSON geometries are non-empty and valid",
         ],
         "counts": {
@@ -1427,6 +2059,16 @@ def validate_exports(solver: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             "address_clusters": len(solver["address_clusters"]),
             "buildings": len(scenario["buildings"]["features"]),
             "protected_features": len(scenario["protected_corridors"]["features"]),
+            "terminal_zone_ineligible_physical_segments": len(
+                {
+                    edge["physical_id"]
+                    for edge in solver["edges"]
+                    if edge.get("terminal_zone_ineligible")
+                }
+            ),
+            "primary_portal_approach_ineligible_physical_segments": len(approach_physical_ids),
+            "setback_overlap_ineligible_physical_segments": len(overlap_physical_ids),
+            "additional_primary_portal_approach_exclusions": len(additional_approach_physical_ids),
         },
     }
 
@@ -1437,9 +2079,12 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
     tram_geojson, tram_wgs_lines = tram_features(ways, nodes)
     tram_xy_lines = [project.line_xy(list(line.coords)) for line in tram_wgs_lines]
     physical_edges, crossings = simplify_road_ways(ways, nodes, project, tram_xy_lines)
-    solver_nodes, directed_edges, candidates = directed_graph_data(physical_edges, nodes, project)
     portals, boundary_crossings = cluster_portals(crossings, project, physical_edges)
     primary_portals = select_primary_portals(portals, project)
+    apply_primary_portal_approach_setback(physical_edges, primary_portals, project)
+    solver_nodes, directed_edges, candidates = directed_graph_data(physical_edges, nodes, project)
+    # Candidate IDs only exist after all eligibility policies have run.
+    annotate_portal_adjacency(portals, physical_edges)
     buildings_geojson, buildings = building_features(ways, nodes, project)
     clusters = address_clusters(buildings, solver_nodes, portals, project)
     assign_candidate_access_penalties(
@@ -1473,6 +2118,24 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
     snapshot_compact = str(snapshot_timestamp).replace("-", "").replace(":", "").replace("Z", "Z")
     snapshot_id = f"osm-{snapshot_compact}-{raw_hash[:12]}"
     source_query = overpass_query()
+    primary_portal_ids = [portal["id"] for portal in primary_portals]
+    primary_crossing_ids = sorted(
+        crossing["id"] for portal in primary_portals for crossing in portal["member_crossings"]
+    )
+    base_candidate_count = sum(bool(edge["base_candidate_eligible"]) for edge in physical_edges)
+    terminal_zone_count = sum(bool(edge["terminal_zone_ineligible"]) for edge in physical_edges)
+    portal_approach_count = sum(
+        bool(edge["primary_portal_approach_ineligible"]) for edge in physical_edges
+    )
+    setback_overlap_count = sum(
+        bool(edge["terminal_zone_ineligible"]) and bool(edge["primary_portal_approach_ineligible"])
+        for edge in physical_edges
+    )
+    additional_portal_approach_count = sum(
+        bool(edge["primary_portal_approach_ineligible"])
+        and not bool(edge["terminal_zone_ineligible"])
+        for edge in physical_edges
+    )
     metadata = {
         "scenario_id": SCENARIO_ID,
         "name": SCENARIO_NAME,
@@ -1517,13 +2180,79 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
         "candidate_policy": {
             "eligible_highways": sorted(CANDIDATE_HIGHWAYS),
             "minimum_segment_length_m": 10,
+            "base_eligible_physical_segments": base_candidate_count,
+            "analysis_boundary_setback_m": CANDIDATE_BOUNDARY_SETBACK_M,
+            "boundary_distance_field": "candidate.boundary_distance_m",
+            "boundary_distance_export_records": ["edge", "street", "candidate"],
+            "boundary_distance_metric": CANDIDATE_BOUNDARY_DISTANCE_METRIC,
+            "boundary_distance_definition": (
+                "Euclidean distance in EPSG:3067 from the physical segment midpoint used as "
+                "the candidate display point to the projected study-polygon boundary. The "
+                "unrounded distance is used for eligibility; the exported value is rounded "
+                "to 0.1 metre."
+            ),
+            "terminal_zone_ineligible_physical_segments": terminal_zone_count,
+            "primary_portal_approach_setback_m": PRIMARY_PORTAL_APPROACH_SETBACK_M,
+            "nearest_primary_portal_distance_field": (
+                "candidate.nearest_primary_portal_distance_m"
+            ),
+            "nearest_primary_portal_distance_export_records": [
+                "edge",
+                "street",
+                "candidate",
+            ],
+            "nearest_primary_portal_distance_metric": PRIMARY_PORTAL_DISTANCE_METRIC,
+            "nearest_primary_portal_distance_definition": (
+                "Euclidean distance in EPSG:3067 from the physical segment midpoint used as "
+                "the candidate display point to the nearest mapped boundary-crossing point "
+                "belonging to any of the eight primary/selectable portals. Portal display "
+                "markers and the other analytical portals are not distance origins. The "
+                "unrounded distance is used for eligibility; the exported value is rounded "
+                "to 0.1 metre. Equal-distance ties use portal ID then crossing ID."
+            ),
+            "primary_portal_approach_source_portal_ids": primary_portal_ids,
+            "primary_portal_approach_source_crossing_ids": primary_crossing_ids,
+            "primary_portal_approach_ineligible_physical_segments": portal_approach_count,
+            "setback_overlap_ineligible_physical_segments": setback_overlap_count,
+            "additional_primary_portal_approach_exclusions": (additional_portal_approach_count),
+            "total_setback_ineligible_physical_segments": (
+                terminal_zone_count + additional_portal_approach_count
+            ),
+            "eligible_candidate_physical_segments": len(candidates),
             "excluded_highways": sorted(PROTECTED_HIGHWAYS),
             "protected_conditions": [
                 "motorway, trunk, primary or secondary street and links",
                 "explicit bus/PSV lane tags or trolley wire",
                 "road geometry following mapped tram/light-rail infrastructure",
-                "bridge or tunnel",
             ],
+            "ineligible_conditions": [
+                "street class outside the eligible local-street classes",
+                "bridge or tunnel",
+                "physical segment shorter than 10 metres",
+                (
+                    "otherwise eligible segment midpoint less than "
+                    f"{CANDIDATE_BOUNDARY_SETBACK_M:g} metres from the analysis boundary"
+                ),
+                (
+                    "otherwise eligible segment midpoint less than "
+                    f"{PRIMARY_PORTAL_APPROACH_SETBACK_M:g} metres from the nearest crossing "
+                    "point of any primary/selectable portal"
+                ),
+            ],
+            "terminal_zone_semantics": (
+                "Otherwise eligible local segments with display points less than "
+                f"{CANDIDATE_BOUNDARY_SETBACK_M:g} metres "
+                "from the analysis boundary are ineligible, removing immediate boundary-adjacent "
+                "filter points from the search. This is an analytical boundary-bias "
+                "assumption, not public-transport protection or a site-feasibility finding."
+            ),
+            "primary_portal_approach_semantics": (
+                "Otherwise eligible local segment midpoints less than "
+                f"{PRIMARY_PORTAL_APPROACH_SETBACK_M:g} metres from any crossing point in the "
+                "static eight-primary-portal set are ineligible. This reduces solutions that "
+                "merely cap a selected portal approach. It is an analytical endpoint-bias "
+                "control, not a physical or legal siting rule."
+            ),
             "semantics": (
                 "Each modal filter removes all directed private-car edges represented by its "
                 "physical street segment. Walking and cycling remain unchanged; emergency passage "
@@ -1579,6 +2308,13 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
             "primary_portal_count": len(primary_portals),
             "analytical_portal_count": len(portals),
             "boundary_crossing_count": len(boundary_crossings),
+            "default_pair_selection": (
+                "Explicit scenario-specific portal IDs audited against the frozen graph after "
+                "applying both candidate-setback controls; preprocessing verifies that the IDs "
+                "remain primary and that each deterministic directional baseline shortest route "
+                "contains at least one eligible candidate."
+            ),
+            "audited_default_portal_pairs": [dict(pair) for pair in pairs],
         },
         "known_data_scope": [
             "Building ways are included; multipolygon building relations are not expanded.",
@@ -1599,13 +2335,13 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
         "candidates": candidates,
         "portals": portals,
         "boundary_crossings": boundary_crossings,
-        "primary_portal_ids": [portal["id"] for portal in primary_portals],
+        "primary_portal_ids": primary_portal_ids,
         "address_clusters": clusters,
         "defaults": {
             "budget": 4,
             "portal_pairs": pairs,
             "objective_mode": "balanced",
-            "timeout_seconds": 10,
+            "timeout_seconds": 30,
             "emergency_permeable": True,
         },
         "mode_assumptions": {
@@ -1658,6 +2394,60 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
         "properties": {"id": "study-boundary", "name": SCENARIO_NAME, "area_km2": 1.33},
         "geometry": mapping(box(*BBOX)),
     }
+    boundary_xy = transform_geometry(box(*BBOX), project.forward)
+    terminal_zone_xy = orient_polygonal(
+        boundary_xy.difference(
+            boundary_xy.buffer(-CANDIDATE_BOUNDARY_SETBACK_M, join_style="mitre")
+        )
+    )
+    terminal_zone_feature = {
+        "type": "Feature",
+        "id": "candidate-terminal-zone",
+        "properties": {
+            "id": "candidate-terminal-zone",
+            "name": "Candidate terminal zone",
+            "kind": "analysis_boundary_candidate_setback",
+            "setback_m": CANDIDATE_BOUNDARY_SETBACK_M,
+            "boundary_distance_metric": CANDIDATE_BOUNDARY_DISTANCE_METRIC,
+            "candidate_eligible": False,
+            "protected": False,
+            "reason": (
+                "Modal-filter points are excluded here to remove boundary-adjacent cuts; "
+                "this is an analytical eligibility rule, not transport protection."
+            ),
+        },
+        "geometry": mapping(transform_geometry(terminal_zone_xy, project.inverse)),
+    }
+    primary_crossing_points = primary_portal_crossing_points(primary_portals, project)
+    portal_approach_zones_xy = orient_polygonal(
+        unary_union(
+            [
+                record["point_xy"].buffer(PRIMARY_PORTAL_APPROACH_SETBACK_M)
+                for record in primary_crossing_points
+            ]
+        ).intersection(boundary_xy)
+    )
+    portal_approach_zones_feature = {
+        "type": "Feature",
+        "id": "primary-portal-approach-zones",
+        "properties": {
+            "id": "primary-portal-approach-zones",
+            "name": "Primary portal approach zones",
+            "kind": "primary_portal_candidate_setback",
+            "setback_m": PRIMARY_PORTAL_APPROACH_SETBACK_M,
+            "nearest_primary_portal_distance_metric": PRIMARY_PORTAL_DISTANCE_METRIC,
+            "primary_portal_ids": primary_portal_ids,
+            "primary_portal_crossing_ids": primary_crossing_ids,
+            "candidate_eligible": False,
+            "protected": False,
+            "reason": (
+                "Modal-filter points are excluded near the eight selectable portal crossings "
+                "to reduce endpoint-capping solutions; this is an analytical bias control, "
+                "not a physical or legal siting rule."
+            ),
+        },
+        "geometry": mapping(transform_geometry(portal_approach_zones_xy, project.inverse)),
+    }
     street_geojson = street_features(physical_edges)
     protected_geojson = protected_features(physical_edges, tram_geojson)
     initial_feature = {
@@ -1696,6 +2486,8 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
         },
         "metadata": metadata,
         "boundary": boundary_feature,
+        "terminal_zone": terminal_zone_feature,
+        "portal_approach_zones": portal_approach_zones_feature,
         "streets": feature_collection(street_geojson),
         "buildings": feature_collection(buildings_geojson),
         "protected_corridors": feature_collection(protected_geojson),
@@ -1730,7 +2522,18 @@ def build(raw: bytes, acquired_at: str) -> tuple[dict[str, Any], dict[str, Any],
         {
             **boundary_feature,
             "properties": {**boundary_feature["properties"], "layer": "boundary"},
-        }
+        },
+        {
+            **terminal_zone_feature,
+            "properties": {**terminal_zone_feature["properties"], "layer": "terminal_zone"},
+        },
+        {
+            **portal_approach_zones_feature,
+            "properties": {
+                **portal_approach_zones_feature["properties"],
+                "layer": "portal_approach_zones",
+            },
+        },
     ]
     for layer_name, features in (
         ("streets", street_geojson),

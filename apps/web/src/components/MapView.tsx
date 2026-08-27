@@ -103,8 +103,27 @@ function sourceFeatureCollection(value?: FeatureCollection): FeatureCollection {
   return value ?? { type: 'FeatureCollection', features: [] }
 }
 
+function terminalZoneInnerEdges(scenario: Scenario): FeatureCollection<LineString> {
+  const geometry = scenario.terminal_zone.geometry
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates
+  return {
+    type: 'FeatureCollection',
+    features: polygons.flatMap((polygon, polygonIndex) =>
+      polygon.slice(1).map((coordinates, ringIndex) => ({
+        type: 'Feature' as const,
+        id: `terminal-zone-inner-${polygonIndex}-${ringIndex}`,
+        properties: { setback_m: scenario.terminal_zone.properties.setback_m },
+        geometry: { type: 'LineString' as const, coordinates },
+      })),
+    ),
+  }
+}
+
 function addAnalysisLayers(map: MapLibreMap, scenario: Scenario): void {
   map.addSource('boundary', { type: 'geojson', data: scenario.boundary })
+  map.addSource('terminal-zone', { type: 'geojson', data: scenario.terminal_zone })
+  map.addSource('terminal-zone-inner-edge', { type: 'geojson', data: terminalZoneInnerEdges(scenario) })
+  map.addSource('portal-approach-zones', { type: 'geojson', data: scenario.portal_approach_zones })
   map.addSource('buildings', { type: 'geojson', data: scenario.buildings })
   map.addSource('streets', { type: 'geojson', data: scenario.streets })
   map.addSource('protected', { type: 'geojson', data: scenario.protected_corridors })
@@ -121,6 +140,18 @@ function addAnalysisLayers(map: MapLibreMap, scenario: Scenario): void {
     type: 'fill',
     source: 'boundary',
     paint: { 'fill-color': '#e8e4da', 'fill-opacity': 0.3 },
+  })
+  map.addLayer({
+    id: 'terminal-zone-fill',
+    type: 'fill',
+    source: 'terminal-zone',
+    paint: { 'fill-color': '#68706c', 'fill-opacity': 0.075 },
+  })
+  map.addLayer({
+    id: 'portal-approach-zones-fill',
+    type: 'fill',
+    source: 'portal-approach-zones',
+    paint: { 'fill-color': '#4f7277', 'fill-opacity': 0.075 },
   })
   map.addLayer({
     id: 'buildings-fill',
@@ -186,6 +217,28 @@ function addAnalysisLayers(map: MapLibreMap, scenario: Scenario): void {
         ],
       ],
       'line-opacity': 0.94,
+    },
+  })
+  map.addLayer({
+    id: 'terminal-zone-inner-edge',
+    type: 'line',
+    source: 'terminal-zone-inner-edge',
+    paint: {
+      'line-color': '#646b67',
+      'line-opacity': 0.55,
+      'line-width': 1,
+      'line-dasharray': [2, 3],
+    },
+  })
+  map.addLayer({
+    id: 'portal-approach-zones-edge',
+    type: 'line',
+    source: 'portal-approach-zones',
+    paint: {
+      'line-color': '#4f7277',
+      'line-opacity': 0.4,
+      'line-width': 1,
+      'line-dasharray': [1, 3],
     },
   })
   map.addLayer({

@@ -398,6 +398,7 @@ export function App() {
               </summary>
               <div className="assumption-list">
                 <div className="assumption-static"><Accessibility size={16} /><span><strong>Walking & cycling unchanged in model</strong><small>Filters preserve these mode permissions; routes are not separately verified</small></span><Check size={15} /></div>
+                <div className="assumption-static"><Ban size={16} /><span><strong>Endpoint-bias setbacks</strong><small>Filter marker midpoints: {scenario.terminal_zone.properties.setback_m} m from boundary · {scenario.portal_approach_zones.properties.setback_m} m from selectable portal crossings</small></span><Check size={15} /></div>
                 <label className="assumption-toggle">
                   <HeartPulse size={16} />
                   <span><strong>Emergency-permeable filters</strong><small>Assume removable or unlockable treatment</small></span>
@@ -426,7 +427,10 @@ export function App() {
               </div>
             </details>
 
-            <Legend />
+            <Legend
+              boundarySetbackM={scenario.terminal_zone.properties.setback_m}
+              portalSetbackM={scenario.portal_approach_zones.properties.setback_m}
+            />
 
             <footer className="panel-footer">
               <button type="button" onClick={reset}><RotateCcw size={13} />Reset scenario</button>

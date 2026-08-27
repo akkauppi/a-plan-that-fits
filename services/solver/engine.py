@@ -646,19 +646,23 @@ class FourPlantersSolver:
     def _expressions(
         self,
         variables: dict[str, z3.BoolRef],
+        candidate_ids: Sequence[str] | None = None,
     ) -> dict[str, z3.ArithRef]:
-        count_terms = [z3.If(variables[candidate], 1, 0) for candidate in self.candidate_ids]
+        candidates = tuple(candidate_ids if candidate_ids is not None else self.candidate_ids)
+        candidate_set = set(candidates)
+        count_terms = [z3.If(variables[candidate], 1, 0) for candidate in candidates]
         cost_terms = [
             z3.If(variables[candidate], self.scenario.candidates[candidate].cost, 0)
-            for candidate in self.candidate_ids
+            for candidate in candidates
         ]
         access_terms = [
             z3.If(variables[candidate], self.scenario.candidates[candidate].access_penalty, 0)
-            for candidate in self.candidate_ids
+            for candidate in candidates
         ]
         adjacency_terms = [
             z3.If(z3.And(variables[left], variables[right]), 1, 0)
             for left, right in self._close_pairs
+            if left in candidate_set and right in candidate_set
         ]
         return {
             "intervention_count": z3.Sum(count_terms) if count_terms else z3.IntVal(0),
@@ -753,14 +757,34 @@ class FourPlantersSolver:
         optimise_secondary: bool = True,
         primary_lower_bound: int = 0,
     ) -> CandidateAnswer:
+        active_candidates = set(request.forced_interventions)
+        active_candidates.update(
+            candidate for clause in path_clauses for candidate in clause.candidate_ids
+        )
+        active_candidates.update(
+            candidate for clause in access_clauses for candidate in clause.candidate_ids
+        )
+        active_candidates.update(candidate for solution in exclusions for candidate in solution)
+        active_candidate_ids = tuple(sorted(active_candidates))
         variables = {
             candidate: z3.Bool(f"blocked__{candidate}") for candidate in self.candidate_ids
         }
-        expressions = self._expressions(variables)
+        expressions = self._expressions(variables, active_candidate_ids)
         records = self._constraint_records(
             request, pairs, path_clauses, access_clauses, variables, expressions
         )
         internal: list[z3.BoolRef] = []
+        # Candidates absent from every positive path/user constraint cannot
+        # occur in a minimum-cardinality model: removing one preserves all path
+        # cuts, budget and access no-goods while strictly improving objective 1.
+        # Fixing them open shrinks the secondary Z3 search without changing any
+        # attainable lexicographic optimum. Exclusion members stay active for
+        # equal-vector alternative enumeration.
+        internal.extend(
+            z3.Not(variables[candidate])
+            for candidate in self.candidate_ids
+            if candidate not in active_candidates
+        )
         for previous in exclusions:
             internal.append(
                 z3.Or(
@@ -828,7 +852,7 @@ class FourPlantersSolver:
             # sparse Boolean hitting-set model. Prior objectives are fixed
             # before the next is searched, preserving exact lexicographic
             # semantics.
-            for key in objective_keys:
+            for objective_index, key in enumerate(objective_keys):
                 expression = expressions[key]
                 current_value = current_model.eval(expression, model_completion=True).as_long()
                 domain = self._objective_domain(
@@ -874,18 +898,46 @@ class FourPlantersSolver:
                         return CandidateAnswer("timeout", reason=search.reason_unknown())
                     search.pop()
                 objectives[key] = current_value
+                # ``current_model`` came from the base check or the latest
+                # tighter SAT bound and therefore already witnesses this exact
+                # value. After the cheaper bound is UNSAT, adding the equality
+                # is sufficient; immediately re-checking the same witness can
+                # be dramatically more expensive than the proof itself. The
+                # next objective check (or deterministic final selector)
+                # enforces every equality in the documented lexicographic
+                # vector.
                 search.add(expression == current_value)
-                fixed_status, control = self._cooperative_solver_check(
-                    search, deadline, cancel_event
-                )
-                if control:
-                    return CandidateAnswer(
-                        control, reason="solve control requested while fixing an objective"
+                remaining_needs_search = False
+                for remaining_key in objective_keys[objective_index + 1 :]:
+                    remaining_expression = expressions[remaining_key]
+                    remaining_value = current_model.eval(
+                        remaining_expression, model_completion=True
+                    ).as_long()
+                    remaining_domain = self._objective_domain(
+                        remaining_key,
+                        objectives.get("intervention_count", remaining_value),
+                        remaining_value,
                     )
-                assert fixed_status is not None
-                if fixed_status != z3.sat:
-                    return CandidateAnswer("timeout", reason=search.reason_unknown())
-                current_model = search.model()
+                    if remaining_key == "intervention_count" and primary_lower_bound:
+                        remaining_domain = [
+                            value for value in remaining_domain if value >= primary_lower_bound
+                        ]
+                    if remaining_domain.index(remaining_value) > 0:
+                        remaining_needs_search = True
+                        break
+                if remaining_needs_search:
+                    fixed_status, control = self._cooperative_solver_check(
+                        search, deadline, cancel_event
+                    )
+                    if control:
+                        return CandidateAnswer(
+                            control,
+                            reason="solve control requested while fixing an objective",
+                        )
+                    assert fixed_status is not None
+                    if fixed_status != z3.sat:
+                        return CandidateAnswer("timeout", reason=search.reason_unknown())
+                    current_model = search.model()
 
         # Z3 has established the exact objective vector. Select a unique model
         # with a small deterministic hitting-set search over only candidates

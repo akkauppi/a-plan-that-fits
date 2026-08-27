@@ -9,6 +9,8 @@ interface MethodologyProps {
 
 export function Methodology({ scenario, onClose }: MethodologyProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
+  const boundarySetbackM = scenario.terminal_zone.properties.setback_m
+  const portalSetbackM = scenario.portal_approach_zones.properties.setback_m
 
   useEffect(() => {
     closeRef.current?.focus()
@@ -35,10 +37,11 @@ export function Methodology({ scenario, onClose }: MethodologyProps) {
       <section>
         <h3><BookOpenText size={17} />Method in brief</h3>
         <ol>
-          <li><span>01</span><p>Z3 proposes a set of eligible local-street filters under the budget and user constraints.</p></li>
-          <li><span>02</span><p>NetworkX searches the directed car graph for a surviving route between every required portal pair.</p></li>
-          <li><span>03</span><p>Each counterexample becomes a new cut constraint. Candidates that strand an address cluster are rejected.</p></li>
-          <li><span>04</span><p>The final private-car graph and local car access are checked independently. The before/after map wash shows directed strong components: maximal regions with mutual private-car reachability, not traffic volumes. Walking and cycling passability, and removable emergency access, remain explicit filter assumptions rather than separate network proofs.</p></li>
+          <li><span>01</span><p>Candidate filter marker midpoints within {boundarySetbackM} m of the study boundary or {portalSetbackM} m of any selectable portal crossing are excluded, removing immediate endpoint cuts from the search.</p></li>
+          <li><span>02</span><p>Z3 proposes a set of eligible local-street filters under the budget and user constraints.</p></li>
+          <li><span>03</span><p>NetworkX searches the directed car graph for a surviving route between every required portal pair.</p></li>
+          <li><span>04</span><p>Each counterexample becomes a new cut constraint. Candidates that strand an address cluster are rejected.</p></li>
+          <li><span>05</span><p>The final private-car graph and local car access are checked independently. The before/after map wash shows directed strong components: maximal regions with mutual private-car reachability, not traffic volumes. Walking and cycling passability, and removable emergency access, remain explicit filter assumptions rather than separate network proofs.</p></li>
         </ol>
       </section>
 
@@ -54,6 +57,7 @@ export function Methodology({ scenario, onClose }: MethodologyProps) {
           <li>OpenStreetMap tags can be incomplete; candidate eligibility is an abstraction, not a site-feasibility audit.</li>
           <li>Emergency access assumes removable or unlockable filters when that option is enabled. It is not legal approval.</li>
           <li>Walking, cycling, and emergency routes are not separately verified in this frozen scenario.</li>
+          <li>The {boundarySetbackM} m boundary and {portalSetbackM} m portal-crossing setbacks are analytical endpoint-bias controls, not physical or legal siting rules.</li>
           <li>Address clusters approximate local private-car access; individual driveways and curb operations are not modelled.</li>
           <li>A planter is the interface symbol. A real treatment could instead be a bollard, gate, camera restriction, or closure.</li>
         </ul>

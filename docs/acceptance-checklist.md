@@ -11,6 +11,20 @@ verification rather than a single expected intervention set.
   portal clusters; no cluster exceeds the configured 60 m diameter.
 - The browser exposes exactly eight primary portals, two per boundary side, while
   local-access verification can use every analytical portal.
+- Candidate display points are at least 60 m from the projected analysis boundary;
+  the 80 otherwise eligible physical segments in the terminal zone remain ineligible
+  open streets and are not mislabelled as protected transport infrastructure.
+- Candidate display points are also at least 120 m from the nearest mapped crossing
+  point of any of the eight primary portals. That portal-approach rule excludes 79
+  base-eligible segments, overlaps the boundary rule for 47, adds 32 exclusions, and
+  leaves 272 candidates. Its source portal/crossing IDs and unioned GeoJSON zones
+  reconstruct successfully from EPSG:3067 provenance.
+- Both setback classes are analytical bias controls, not transport protection or
+  physical/legal siting rules.
+- The audited defaults are Vilhonvuorenkuja ↔ Agricolankuja and Pälkäneentie ↔
+  Alppikatu. Preprocessing checks that the deterministic shortest route in each
+  direction contains a candidate; the frozen-scenario solver invariant separately
+  establishes exact-four feasibility and independent final verification.
 - Browser startup does not fetch live OSM data or require a tile service.
 - The map keeps visible OpenStreetMap attribution.
 - Provenance states that the frozen graph is derived directly from the committed
@@ -20,6 +34,7 @@ verification rather than a single expected intervention set.
 ## Solver proof obligations
 
 - Selected filters are eligible, unique, and within budget.
+- Budget is an upper bound rather than a requirement to select exactly that many filters.
 - Forced filters are selected; locked-open and protected edges are not selected.
 - Every requested portal pair is disconnected in a fresh private-car graph.
 - Every included address cluster reaches at least one permitted portal.
@@ -54,23 +69,21 @@ verification rather than a single expected intervention set.
 
 ## Release checks and evidence
 
-The most recent targeted checks recorded during the 2026-08-26 release pass are:
+Final 2026-08-28 release evidence:
 
 - deterministic preprocessing validation passed with 1,342 nodes, 2,408 directed
-  edges, 384 candidates, 38 analytical portals, 68 crossing records, 182 address
+  edges, 272 candidates, 38 analytical portals, 68 crossing records, 182 address
   clusters, and validated baseline-egress provenance;
-- 28 non-Helsinki solver/API tests passed after the independent-verifier,
-  deterministic-selector, route-antichain, service-validation, and cancellable-Z3
-  work; the repeated frozen-Helsinki invariant/determinism test also passed in 18.7
-  seconds;
-- frontend lint, strict typecheck, the 15-test unit run, and the production build
-  passed after the timeout/browser accessibility audit;
+- the complete 30-test solver/API/frozen-scenario suite passed in 7.21 seconds;
+- frontend lint, strict typecheck, all 24 unit tests, and the production build passed;
+- all eight Playwright desktop/tablet stories passed in 1.4 minutes, covering solve
+  refinement, alternatives, street locking, verified UNSAT, timeout, cancellation,
+  and the regenerated release screenshots;
 - desktop (1,440 × 900) and tablet (820 × 1,180) browser audits reported no material
   console, network, overflow, or accessibility errors.
 
-Those are checkpoint facts, not permission to skip the final commands after later
-source or data changes. A release handoff should record the output from all of the
-following on one final working tree:
+The release handoff records the output from all of the following on the final working
+tree:
 
 - Python tests and scenario invariants pass.
 - Frontend unit tests, lint, typecheck, and production build pass.

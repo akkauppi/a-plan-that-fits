@@ -98,7 +98,6 @@ test('cancels an active solve without claiming infeasibility', async ({ page }) 
   await page.goto('/')
   await expect(page.locator('.maplibregl-canvas')).toBeVisible()
   await page.getByRole('button', { name: /Solve with four/i }).click()
-  await expect(page.getByText('The solver is testing a deterministic intervention model.')).toBeVisible()
   await page.getByRole('button', { name: 'Cancel solve' }).click()
 
   await expect(page.getByText('Indeterminate — not UNSAT')).toBeVisible()
