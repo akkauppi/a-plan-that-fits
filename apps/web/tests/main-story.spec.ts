@@ -1,5 +1,45 @@
 import { expect, test, type Page } from '@playwright/test'
 
+test('preflights frozen Otaniemi and picks a custom location on the map', async ({ page }, testInfo) => {
+  // This integration story deliberately replays and independently validates the
+  // full frozen OSM graph. Simultaneous Chromium, Vite, and API load can make the
+  // cold rebuild substantially slower than its standalone runtime, so keep the
+  // observed worst-case allowance local to this test.
+  testInfo.setTimeout(420_000)
+  const browserErrors = monitorBrowserErrors(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Study area', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: 'Choose the network' })).toBeVisible()
+  await expect(page.getByText('Otaniemi coast, Espoo')).toBeVisible()
+  await expect(page.locator('.build-summary').getByText('Verified')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText('SYKE coastal flood zones')).toBeVisible()
+  await expect(page.getByText('City of Espoo municipal context')).toBeVisible()
+  await expect(page.getByText('Key needed')).toBeVisible()
+  await expect(page.getByText('User source')).toBeVisible()
+  await expect(page.getByText('892 segments')).toBeVisible()
+  await expect(page.getByText('1,608 segments')).toBeVisible()
+  await page.screenshot({ path: screenshotPath('builder-otaniemi', testInfo.project.name) })
+
+  if (!testInfo.project.name.includes('tablet')) {
+    await page.getByRole('button', { name: /Rebuild from frozen archive/i }).click()
+    await expect(page.getByText('Base network ready')).toBeVisible({ timeout: 360_000 })
+    await expect(page.getByText('base-c8dcbcfaca2b2c9498420681')).toBeVisible()
+  }
+
+  await page.getByText('Custom Finland location', { exact: true }).click()
+  const locator = page.getByRole('img', { name: /Location map centred/i })
+  await expect(locator).toBeVisible()
+  const before = await page.getByLabel('Longitude').inputValue()
+  await locator.click({ position: { x: 120, y: 72 } })
+  await expect.poll(() => page.getByLabel('Longitude').inputValue()).not.toBe(before)
+  await page.getByRole('button', { name: 'Check bounds & sources' }).click()
+  await expect(page.getByText('Archive needed')).toBeVisible()
+  await expect(page.getByText('Live refresh required')).toBeVisible()
+  await page.screenshot({ path: screenshotPath('builder-location', testInfo.project.name) })
+  expect(browserErrors).toEqual([])
+})
+
 test('loads the frozen map, refines a solution, and requests an alternative', async ({ page }, testInfo) => {
   const browserErrors = monitorBrowserErrors(page)
   await page.goto('/')

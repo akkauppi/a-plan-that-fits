@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "finland-resilient-access-v1",
+  "scenario_id": "espoo-otaniemi-coastal-v1",
+  "name": "Otaniemi coastal resilient-access sources",
+  "scenario_type": "resilient_access",
+  "analysis_crs": "EPSG:3067",
+  "network_context_buffer_m": 750,
+  "area": {
+    "kind": "polygon",
+    "coordinate_crs": "EPSG:4326",
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [24.814, 60.19],
+          [24.8115, 60.1835],
+          [24.815, 60.176],
+          [24.832, 60.1735],
+          [24.8415, 60.1763],
+          [24.8425, 60.187],
+          [24.8345, 60.1912],
+          [24.814, 60.19]
+        ]
+      ]
+    }
+  },
+  "sources": [
+    {
+      "adapter_id": "osm",
+      "role": "base_network",
+      "required": true,
+      "parameters": {
+        "overpass_timeout_s": 120
+      }
+    },
+    {
+      "adapter_id": "syke",
+      "role": "flood_hazard",
+      "required": true,
+      "parameters": {
+        "layers": [
+          "inspire_nz:NZ.Tulvavaaravyohykkeet_Meritulva_1_100a",
+          "inspire_nz:NZ.Tulvavaaravyohykkeet_Meritulva_1_1000a"
+        ],
+        "wfs_timeout_s": 120
+      }
+    },
+    {
+      "adapter_id": "espoo_wfs",
+      "role": "municipal_context",
+      "required": true,
+      "parameters": {
+        "layers": [
+          "GIS:Keskilinjat",
+          "GIS:Pyorailykartta",
+          "GIS:Rakennukset",
+          "GIS:Osoitteet",
+          "GIS:Vesialueet",
+          "GIS:InfStreet"
+        ],
+        "wfs_timeout_s": 120
+      }
+    }
+  ]
+}

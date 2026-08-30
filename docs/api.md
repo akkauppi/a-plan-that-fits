@@ -1,4 +1,4 @@
-# Solver API
+# HTTP API
 
 All scenario coordinates exposed to the browser use WGS84 longitude/latitude. The
 analytical graph is frozen with the scenario and may use a projected metric CRS.
@@ -105,3 +105,105 @@ active Z3 check and is also observed at deterministic graph-analysis boundaries.
 
 A non-streaming diagnostic endpoint used by tests and command-line verification.
 It has the same request and final-result shape as the streaming solve.
+
+## Resilient-access scenario-builder API
+
+These endpoints publish verified **base-network artifacts** beside the loaded
+scenario. They do not change the active Kallio solver, run the planter model, derive
+flood passability, or claim safe access.
+
+### `GET /api/scenario-builder/catalog`
+
+Returns the default frozen Otaniemi preset, Finland-v1 point/radius limits, the
+750 m context-buffer policy, and an explicit statement that the active solver is
+unchanged.
+
+### `POST /api/scenario-builder/preflight`
+
+Accepts one of:
+
+```json
+{}
+```
+
+```json
+{ "preset_id": "otaniemi-coastal-v1" }
+```
+
+```json
+{
+  "area": {
+    "kind": "point_radius",
+    "longitude": 24.827,
+    "latitude": 60.185,
+    "radius_m": 1000
+  }
+}
+```
+
+An empty body selects the frozen Otaniemi preset. A custom radius must be 100–2,500
+m and the complete area must pass the Finland profile bounds. The response contains
+the deterministic recipe identity, core and context bounds, local archive
+readiness, current derived snapshot (if any), and source-specific coverage states.
+Preflight is offline and does not fetch, prove completeness, infer closure, or
+mutate the solver.
+
+For the frozen Otaniemi preset, `analysis_artifacts.flood_exposure` also reports the
+validated exposure snapshot ID and the 1/100 and 1/1000 segment, overlap-length, and
+vertical-review counts. Its `scope` is always `exposure_only` and
+`passability_inferred` is always `false`. A custom area without frozen hazard inputs
+returns `not_requested`; missing, incompatible, and invalid artifacts are not shown
+as verified.
+
+### `POST /api/scenario-builder/jobs`
+
+Starts one background base-network build and returns HTTP 202 with the job record.
+Offline replay is the default:
+
+```json
+{ "preset_id": "otaniemi-coastal-v1" }
+```
+
+A live bounded Overpass request requires two explicit fields:
+
+```json
+{
+  "area": {
+    "kind": "point_radius",
+    "longitude": 24.827,
+    "latitude": 60.185,
+    "radius_m": 1000
+  },
+  "refresh": true,
+  "confirm_live_source_refresh": "REFRESH_OSM"
+}
+```
+
+Supplying the acknowledgement without `refresh: true`, or requesting refresh
+without the exact acknowledgement, returns HTTP 422. Arbitrary endpoint URLs are
+not accepted. Only one job may be active; a second start returns HTTP 409.
+
+Job states distinguish `queued`, `preflighting`, `building`,
+`cancellation_requested`, `verified`, `missing_archive`, `failed`, and `cancelled`.
+A custom offline build with no matching frozen archive becomes `missing_archive`,
+not an empty graph or a live request.
+
+### `GET /api/scenario-builder/jobs/{job_id}`
+
+Returns the current job record, event history, error envelope, and verified result
+when complete. A verified result reports the immutable snapshot ID, path, node and
+directed-edge counts, and `scope: "base_network_only"`.
+
+### `GET /api/scenario-builder/jobs/{job_id}/events?after=N`
+
+Returns events whose monotonically increasing `sequence` is greater than `N`. This
+is bounded polling, not Server-Sent Events. Event messages distinguish source
+replay/refresh, validation, publication, cancellation, missing archive, and failure.
+
+### `POST /api/scenario-builder/jobs/{job_id}/cancel`
+
+Requests cooperative cancellation and returns HTTP 202 when accepted. Cancellation
+is checked between deterministic build steps. If the request arrives after an
+immutable artifact has been published, the artifact may remain in the cache, but it
+still does not activate or replace the Kallio solver. Cancelling an already terminal
+job returns HTTP 409.

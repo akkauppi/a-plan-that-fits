@@ -225,6 +225,140 @@ export interface ScenarioSettings {
   timeoutSeconds: number
 }
 
+export interface BuilderPointRadiusArea {
+  kind: 'point_radius'
+  longitude: number
+  latitude: number
+  radius_m: number
+}
+
+export interface BuilderSelection {
+  preset_id?: 'otaniemi-coastal-v1'
+  area?: BuilderPointRadiusArea
+}
+
+export interface BuilderBuildRequest extends BuilderSelection {
+  refresh?: boolean
+  confirm_live_source_refresh?: 'REFRESH_OSM'
+}
+
+export interface BuilderCatalog {
+  schema_version: string
+  profile_id: string
+  default_preset_id: 'otaniemi-coastal-v1'
+  presets: Array<{
+    id: 'otaniemi-coastal-v1'
+    name: string
+    description: string
+    frozen: boolean
+    default_successor: boolean
+  }>
+  location_limits: {
+    coordinate_crs: string
+    finland_preflight_envelope: [number, number, number, number]
+    radius_m: { minimum: number; maximum: number; default: number }
+    network_context_buffer_m: number
+  }
+  active_solver: { scenario: string; unchanged: boolean; message: string }
+}
+
+export interface BuilderSourceReadiness {
+  adapter_id: string
+  name: string
+  role: string
+  readiness: 'archived' | 'refresh_required' | 'missing' | 'invalid_archive' | 'credentials_required' | 'user_source_required'
+  available_offline: boolean
+  feature_count?: number | null
+  acquired_at?: string | null
+  source_timestamp?: string | null
+  spatial_coverage: 'full' | 'partial' | 'none' | 'unknown'
+  message: string
+}
+
+export interface BuilderPreflight {
+  schema_version: string
+  selection: BuilderSelection
+  recipe: {
+    scenario_id: string
+    name: string
+    sha256: string
+    analysis_crs: string
+    network_context_buffer_m: number
+  }
+  area: {
+    coordinate_crs: string
+    core_geometry: Geometry
+    core_bbox: [number, number, number, number]
+    core_area_km2: number
+    network_context_bbox: [number, number, number, number]
+  }
+  sources: BuilderSourceReadiness[]
+  analysis_artifacts: {
+    flood_exposure: {
+      status: 'verified_exposure' | 'not_built' | 'invalid_exposure' | 'base_unavailable' | 'not_requested'
+      scope: 'exposure_only'
+      passability_inferred: false
+      snapshot_id?: string
+      base_snapshot_id?: string
+      return_periods?: Record<'100' | '1000', {
+        exposed_segments: number
+        exposed_length_m: number
+        vertical_review_segments: number
+      }>
+      message: string
+    }
+  }
+  offline_build_ready: boolean
+  build: {
+    status: 'verified_snapshot' | 'not_built' | 'invalid_snapshot'
+    snapshot_id?: string | null
+    message?: string
+  }
+  semantics: {
+    coverage_is_not_completeness: boolean
+    base_network_only: boolean
+    active_solver_unchanged: boolean
+    flood_passability_inferred: boolean
+    message: string
+  }
+}
+
+export type BuilderJobStatus =
+  | 'queued'
+  | 'preflighting'
+  | 'building'
+  | 'cancellation_requested'
+  | 'verified'
+  | 'missing_archive'
+  | 'failed'
+  | 'cancelled'
+
+export interface BuilderJobEvent {
+  sequence: number
+  type: string
+  message: string
+  timestamp: string
+  details: Record<string, unknown>
+}
+
+export interface BuilderJob {
+  job_id: string
+  status: BuilderJobStatus
+  created_at: string
+  updated_at: string
+  scenario_id: string
+  refresh: boolean
+  result?: {
+    snapshot_id?: string
+    node_count?: number
+    directed_edge_count?: number
+    snapshot_path?: string
+    scope?: string
+  } | null
+  error?: { code: string; message: string } | null
+  events: BuilderJobEvent[]
+}
+
 export function asFeatureCollection(features?: Array<Feature<Geometry>>): FeatureCollection {
   return { type: 'FeatureCollection', features: features ?? [] }
 }

@@ -9,13 +9,18 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .engine import AlternativeContext, FourPlantersSolver, RunRecord
 from .models import CancelRequest, NextSolutionRequest, SolveRequest
 from .scenario import DEFAULT_BROWSER_PATH, DEFAULT_SOLVER_PATH, Scenario, load_scenario
+from .scenario_builder_api import (
+    BuilderBuildRequest,
+    BuilderSelection,
+    ScenarioBuilderService,
+)
 
 
 class SessionRegistry:
@@ -94,6 +99,7 @@ def create_app(
     scenario: Scenario | None = None,
     solver_path: str | Path = DEFAULT_SOLVER_PATH,
     browser_path: str | Path | None = DEFAULT_BROWSER_PATH,
+    scenario_builder: ScenarioBuilderService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Four Planters Solver API",
@@ -129,6 +135,7 @@ def create_app(
     app.state.engine = engine
     app.state.registry = registry
     app.state.load_error = load_error
+    app.state.scenario_builder = scenario_builder or ScenarioBuilderService()
 
     def require_engine() -> FourPlantersSolver:
         if app.state.engine is None:
@@ -163,6 +170,60 @@ def create_app(
     async def scenario_endpoint() -> dict[str, Any]:
         require_engine()
         return app.state.scenario.public_payload()
+
+    @app.get("/api/scenario-builder/catalog")
+    async def scenario_builder_catalog() -> dict[str, Any]:
+        return app.state.scenario_builder.catalog()
+
+    @app.post("/api/scenario-builder/preflight")
+    async def scenario_builder_preflight(selection: BuilderSelection) -> dict[str, Any]:
+        try:
+            return app.state.scenario_builder.preflight(selection)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "preflight_failed", "message": str(error)},
+            ) from error
+
+    @app.post("/api/scenario-builder/jobs", status_code=status.HTTP_202_ACCEPTED)
+    async def scenario_builder_start(request: BuilderBuildRequest) -> dict[str, Any]:
+        try:
+            return app.state.scenario_builder.start(request)
+        except RuntimeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "build_already_active", "message": str(error)},
+            ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "build_request_invalid", "message": str(error)},
+            ) from error
+
+    @app.get("/api/scenario-builder/jobs/{job_id}")
+    async def scenario_builder_job(job_id: str) -> dict[str, Any]:
+        try:
+            return app.state.scenario_builder.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Scenario build job not found.") from error
+
+    @app.get("/api/scenario-builder/jobs/{job_id}/events")
+    async def scenario_builder_events(
+        job_id: str,
+        after: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        try:
+            return app.state.scenario_builder.events(job_id, after)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Scenario build job not found.") from error
+
+    @app.post("/api/scenario-builder/jobs/{job_id}/cancel", status_code=202)
+    async def scenario_builder_cancel(job_id: str) -> JSONResponse:
+        try:
+            result = app.state.scenario_builder.cancel(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Scenario build job not found.") from error
+        return JSONResponse(status_code=202 if result["accepted"] else 409, content=result)
 
     def stream_run(
         solve_request: SolveRequest,

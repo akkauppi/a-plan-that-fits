@@ -10,6 +10,11 @@ import type {
   SolveRequest,
   SolveResult,
   SuggestedRelaxation,
+  BuilderBuildRequest,
+  BuilderCatalog,
+  BuilderJob,
+  BuilderPreflight,
+  BuilderSelection,
 } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? '/api'
@@ -365,4 +370,74 @@ export async function cancelSolve(solveId?: string): Promise<void> {
     body: JSON.stringify({ solve_id: solveId ?? null }),
   })
   if (!response.ok) throw new ApiError(`Cancellation failed (${response.status})`, response.status, await response.text())
+}
+
+async function builderJson<T>(response: Response, operation: string): Promise<T> {
+  if (!response.ok) {
+    const body = await response.text()
+    let message = `${operation} failed (${response.status})`
+    try {
+      const parsed = JSON.parse(body) as { detail?: string | { message?: string } }
+      if (typeof parsed.detail === 'string') message = parsed.detail
+      else if (parsed.detail?.message) message = parsed.detail.message
+    } catch {
+      // Retain the explicit HTTP failure when the response is not JSON.
+    }
+    throw new ApiError(message, response.status, body)
+  }
+  return response.json() as Promise<T>
+}
+
+export async function getBuilderCatalog(signal?: AbortSignal): Promise<BuilderCatalog> {
+  const response = await fetch(`${API_BASE}/scenario-builder/catalog`, {
+    headers: { Accept: 'application/json' },
+    signal,
+  })
+  return builderJson<BuilderCatalog>(response, 'Scenario-builder catalog request')
+}
+
+export async function preflightBuilder(
+  selection: BuilderSelection,
+  signal?: AbortSignal,
+): Promise<BuilderPreflight> {
+  const response = await fetch(`${API_BASE}/scenario-builder/preflight`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(selection),
+    signal,
+  })
+  return builderJson<BuilderPreflight>(response, 'Location preflight')
+}
+
+export async function startBuilderJob(
+  request: BuilderBuildRequest,
+  signal?: AbortSignal,
+): Promise<BuilderJob> {
+  const response = await fetch(`${API_BASE}/scenario-builder/jobs`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal,
+  })
+  return builderJson<BuilderJob>(response, 'Base-network build')
+}
+
+export async function getBuilderJob(jobId: string, signal?: AbortSignal): Promise<BuilderJob> {
+  const response = await fetch(`${API_BASE}/scenario-builder/jobs/${encodeURIComponent(jobId)}`, {
+    headers: { Accept: 'application/json' },
+    signal,
+  })
+  return builderJson<BuilderJob>(response, 'Build status request')
+}
+
+export async function cancelBuilderJob(jobId: string): Promise<{
+  job_id: string
+  accepted: boolean
+  status: string
+}> {
+  const response = await fetch(`${API_BASE}/scenario-builder/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  })
+  return builderJson(response, 'Build cancellation')
 }

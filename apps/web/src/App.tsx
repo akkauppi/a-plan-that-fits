@@ -13,6 +13,7 @@ import {
   HeartPulse,
   Link2,
   LoaderCircle,
+  MapPinned,
   RotateCcw,
   Share2,
   Shield,
@@ -28,6 +29,7 @@ import { MapView } from './components/MapView'
 import { Methodology } from './components/Methodology'
 import { PortalPairs } from './components/PortalPairs'
 import { ResultPanel } from './components/ResultPanel'
+import { ScenarioBuilderDrawer } from './components/ScenarioBuilderDrawer'
 import { SolverTimeline } from './components/SolverTimeline'
 import type {
   Alternative,
@@ -75,6 +77,7 @@ export function App() {
   const [showAccess, setShowAccess] = useState(false)
   const [showMethod, setShowMethod] = useState(false)
   const [showCompare, setShowCompare] = useState(false)
+  const [showBuilder, setShowBuilder] = useState(false)
   const [shareNotice, setShareNotice] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const abortRef = useRef<AbortController | undefined>(undefined)
@@ -332,6 +335,7 @@ export function App() {
         </a>
         <p>Can four small filters stop private-car through-routing while keeping every address connected?</p>
         <nav aria-label="Application information">
+          <button type="button" onClick={() => setShowBuilder(true)}><MapPinned size={15} /> Study area</button>
           <button type="button" onClick={() => setShowMethod(true)}><BookOpenText size={15} /> Method</button>
           <button type="button" onClick={share}><Share2 size={15} /> {shareNotice ? 'Link copied' : 'Share'}</button>
         </nav>
@@ -478,6 +482,12 @@ export function App() {
       </main>
 
       {showMethod && <><button className="sheet-backdrop" type="button" onClick={() => setShowMethod(false)} aria-label="Dismiss methods overlay" tabIndex={-1} /><Methodology scenario={scenario} onClose={() => setShowMethod(false)} /></>}
+      {showBuilder && (
+        <>
+          <button className="sheet-backdrop" type="button" onClick={() => setShowBuilder(false)} aria-label="Dismiss study-area builder" tabIndex={-1} />
+          <ScenarioBuilderDrawer onClose={() => setShowBuilder(false)} />
+        </>
+      )}
       {showCompare && (
         <>
           <button className="sheet-backdrop" type="button" onClick={() => setShowCompare(false)} aria-label="Dismiss comparison overlay" tabIndex={-1} />
