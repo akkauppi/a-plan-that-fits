@@ -23,6 +23,19 @@ uses all four at its verified optimum. See [the release handoff](docs/reboot-han
 and the exact distinction between completed evidence and release checks that should
 be rerun after a change.
 
+As of 2026-08-30, Four Planters is a **completed baseline rather than the primary
+continuing research question**. Its engineering assets will be reused, but further
+expansion of portal/filter experiments has diminishing scientific value because the
+result is strongly controlled by boundary, portal, and candidate assumptions and is
+often close to a small graph cut.
+
+The accepted next direction is a location-driven **resilient-access** experiment
+combining sourced flood scenarios with planned street works. Otaniemi, Espoo is the
+proposed first default area, subject to a source-coverage and network audit. See the
+[project decision and roadmap](docs/project-status-and-roadmap.md). None of those
+successor capabilities is represented as implemented yet; this README otherwise
+documents the reproducible Four Planters baseline.
+
 ## Run locally
 
 Requirements: Python 3.11+, Node.js 20+, npm, and a browser.
@@ -55,7 +68,7 @@ make data-refresh
 That command contacts Overpass, archives the raw bounded response with a checksum,
 and replaces the derived snapshot. Normal startup and `make data` remain offline.
 
-## Frozen Helsinki scenario
+## Completed Four Planters reference scenario
 
 - Study polygon/bbox (WGS84): `[24.9435, 60.1854, 24.9635, 60.1962]`
 - Approximate area: 1.33 km²
@@ -125,7 +138,8 @@ Tracked assumptions are translated into human-facing UNSAT explanations and sugg
 relaxations; assumptions are never changed automatically.
 
 See [architecture and proof boundary](docs/architecture.md), [API](docs/api.md), and
-the [acceptance checklist](docs/acceptance-checklist.md).
+the [acceptance checklist](docs/acceptance-checklist.md). The project conclusion and
+successor plan are in the [status and roadmap](docs/project-status-and-roadmap.md).
 
 ## Interface
 
@@ -165,11 +179,12 @@ in a verified result.
 
 The reproducible data command derives topology directly from the committed bounded
 Overpass response. It preserves parallel ways and one-way direction, but this frozen
-scenario is not an OSMnx-produced set of drive/walk/bike mode graphs. OSMnx is
-available as an optional geospatial dependency and a future pipeline direction, not
-the provenance of the current proof graph. The production Vite build also reports a
-single large JavaScript-chunk advisory (about 1.33 MB before gzip, about 368 kB after
-gzip); this is a load-performance improvement opportunity, not a build failure.
+scenario is not an OSMnx-produced set of drive/walk/bike mode graphs. OSMnx remains
+an optional geospatial dependency; the successor instead requires explicit,
+separately attributed source adapters described in the roadmap. The production Vite
+build also reports a single large JavaScript-chunk advisory (about 1.33 MB before
+gzip and about 368 kB after gzip); this is a load-performance improvement opportunity,
+not a build failure.
 
 ## Repository layout
 

@@ -1,4 +1,12 @@
-# Release handoff — 2026-08-26
+# Four Planters final-baseline handoff
+
+> Four Planters entered completed-baseline status on 2026-08-30. This file preserves
+> its reproducible release evidence. New work should follow the
+> [resilient-access decision and roadmap](project-status-and-roadmap.md) without
+> weakening this baseline.
+
+- **Final baseline evidence:** 2026-08-28
+- **Lifecycle decision recorded:** 2026-08-30
 
 This file began as the reboot note and now records the reproducible release state.
 The frozen source snapshot is unchanged; the portal model, access objective,

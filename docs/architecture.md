@@ -1,5 +1,9 @@
 # Architecture and proof boundary
 
+> **Lifecycle note:** this document describes the completed Four Planters baseline.
+> The accepted successor direction and proposed generalization boundary are recorded
+> in the [project status and roadmap](project-status-and-roadmap.md).
+
 Four Planters is a deliberately small two-process monorepo:
 
 ```text

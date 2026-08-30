@@ -27,9 +27,9 @@ Accepts:
 
 ```json
 {
-  "scenario_id": "vallila-kallio-2026-08",
+  "scenario_id": "helsinki-kallio-vallila",
   "budget": 4,
-  "required_portal_pairs": [{ "a": "portal-n", "b": "portal-s" }],
+  "required_portal_pairs": [{ "a": "p-east-01", "b": "p-south-04" }],
   "forced_interventions": [],
   "locked_open_streets": [],
   "emergency_permeable": true,
