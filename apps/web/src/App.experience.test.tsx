@@ -7,6 +7,10 @@ vi.mock('./components/MapView', () => ({
   MapView: () => <div aria-label="Baseline map">Kallio analytical map</div>,
 }))
 
+vi.mock('./components/ResilienceAnalysisMap', () => ({
+  ResilienceAnalysisMap: () => <div aria-label="Resilience analytical map">Otaniemi analytical map</div>,
+}))
+
 const polygon = {
   type: 'Feature',
   properties: {},
@@ -41,6 +45,70 @@ const scenario = {
   attribution: '© OpenStreetMap contributors',
   license: 'ODbL',
   source: 'OpenStreetMap',
+}
+
+const emptyCollection = { type: 'FeatureCollection', features: [] }
+const emptyAnalysis = {
+  status: 'verified',
+  claim_scope: 'Frozen directed private-car graph only.',
+  assumption: {
+    flood_return_period_years: 1000,
+    treat_flood_exposure_as_unavailable: true,
+    roadworks_segment_ids: [],
+    unavailable_segment_ids: ['segment-flooded'],
+    analytically_passable_segment_ids: [],
+  },
+  summary: {
+    origins: 1,
+    retained: 0,
+    stranded: 1,
+    baseline_unreachable: 0,
+    unavailable_segments: 1,
+    weak_components: 2,
+  },
+  access: [],
+}
+const resilienceScenario = {
+  schema_version: '1.0',
+  id: 'otaniemi-access-v1',
+  name: 'Otaniemi coastal access',
+  description: 'Frozen private-car access stress test.',
+  snapshot_id: 'otaniemi-test-v1',
+  center: [24.828, 60.184],
+  bbox: [24.8, 60.16, 24.85, 60.2],
+  core_boundary: polygon.geometry,
+  network_context_boundary: polygon.geometry,
+  base_network: emptyCollection,
+  buildings: emptyCollection,
+  flood_exposure: emptyCollection,
+  origins: [{
+    id: 'origin-1', label: 'Otaranta representative cell', node_id: 'node-1',
+    point: [24.83, 60.18], requested_point: [24.83, 60.18], snap_distance_m: 12,
+    address_count: 5, street_names: ['Otaranta'], source: 'Espoo', aggregation: '500 m cell',
+  }],
+  gateway_groups: [{
+    id: 'gateway-east', label: 'East · Kuusisaarentie', direction: 'east',
+    point: [24.85, 60.18], destination_count: 1, destination_ids: ['node-east'],
+    definition: 'Reviewed outbound context endpoint.',
+  }],
+  decision_groups_by_return_period: { 100: [], 1000: [] },
+  default_disruption_analysis: emptyAnalysis,
+  analysis_presets: {
+    teaching_focus: { label: 'Teaching focus', origin_ids: ['origin-1'], gateway_group_ids: ['gateway-east'], purpose: 'Fast trace.' },
+    all_origins_sensitivity: { label: 'All cells', origin_ids: ['origin-1'], gateway_group_ids: ['gateway-east'], purpose: 'Sensitivity.' },
+  },
+  defaults: {
+    flood_return_period_years: 1000, treat_flood_exposure_as_unavailable: true,
+    origin_ids: ['origin-1'], gateway_group_ids: ['gateway-east'], analytical_repair_budget: 4, timeout_seconds: 30,
+  },
+  counts: {
+    nodes: 10, directed_edges: 12, physical_segments: 8, private_car_physical_segments: 8,
+    municipal_address_points_in_core: 297, origin_clusters: 15, gateway_groups: 4,
+    municipal_buildings: 20, private_car_exposed_segments: { 100: 241, 1000: 528 },
+    source_exposed_segments: { 100: 892, 1000: 1608 },
+  },
+  semantics: {},
+  attribution: 'OSM · SYKE · Espoo',
 }
 
 const catalog = {
@@ -156,6 +224,7 @@ function json(value: unknown): Response {
 function installApiMock(): void {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
+    if (url.endsWith('/resilience/scenario')) return json(resilienceScenario)
     if (url.endsWith('/scenario')) return json(scenario)
     if (url.endsWith('/scenario-builder/catalog')) return json(catalog)
     if (url.endsWith('/scenario-builder/preflight')) return json(preflight)
@@ -173,13 +242,11 @@ describe('application experience hierarchy', () => {
     installApiMock()
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: /Keep the coast reachable/i })).toBeInTheDocument()
-    expect(screen.getByText(/Current research experiment · Otaniemi/i)).toBeInTheDocument()
-    expect(screen.getByText('4 source families')).toBeInTheDocument()
-    expect(screen.getByText('OSM · NLS · SYKE · Espoo')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Solve with four/i })).not.toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: 'Otaniemi network evidence' })).toBeInTheDocument()
-    expect(screen.getByText('Raster archived')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /See what stays reachable/i })).toBeInTheDocument()
+    expect(screen.getByText(/Current experiment · frozen Otaniemi/i)).toBeInTheDocument()
+    expect(screen.getByText('15 representative 500 m cells')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Solve access with 4/i })).toBeInTheDocument()
+    expect(screen.getByLabelText('Resilience analytical map')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Kallio baseline' })).toBeInTheDocument()
   })
 
@@ -188,7 +255,7 @@ describe('application experience hierarchy', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByRole('heading', { name: 'Otaniemi network evidence' })
+    await screen.findByRole('heading', { name: /See what stays reachable/i })
     await user.click(screen.getByRole('button', { name: 'Kallio baseline' }))
 
     expect(await screen.findByRole('button', { name: /Solve with four/i })).toBeInTheDocument()
@@ -197,7 +264,23 @@ describe('application experience hierarchy', () => {
     expect(screen.getByRole('button', { name: 'Otaniemi experiment' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Otaniemi experiment' }))
-    expect(screen.getByRole('heading', { name: /Keep the coast reachable/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /See what stays reachable/i })).toBeInTheDocument()
+  })
+
+  it('opens the solver comparison guide and returns to the live experiment', async () => {
+    installApiMock()
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByRole('heading', { name: /See what stays reachable/i })
+    await user.click(screen.getByRole('button', { name: 'How solvers differ' }))
+
+    expect(screen.getByRole('heading', { name: /route finder searches a network/i })).toBeInTheDocument()
+    expect(screen.getByText(/routing tells us whether a proposed network works/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Live experiment' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Live experiment' }))
+    expect(await screen.findByRole('heading', { name: /See what stays reachable/i })).toBeInTheDocument()
   })
 
   it('restores a shared baseline URL and preserves the experiment when settings change', async () => {

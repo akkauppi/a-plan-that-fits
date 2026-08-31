@@ -359,6 +359,218 @@ export interface BuilderJob {
   events: BuilderJobEvent[]
 }
 
+export type ResilienceResultStatus =
+  | 'verified_optimal'
+  | 'verified_unsat'
+  | 'timeout'
+  | 'cancelled'
+  | 'data_error'
+
+export interface ResilienceRoute {
+  destination_node_id: string
+  length_m: number
+  directed_edge_ids: string[]
+  physical_segment_ids: string[]
+  feature: Feature<Geometry>
+  unavailable_segment_ids?: string[]
+  purpose?: string
+}
+
+export interface ResilienceAccessRecord {
+  origin: {
+    id: string
+    label: string
+    node_id: string
+    point: Coordinate
+    requested_point: Coordinate
+    snap_distance_m: number
+    allowed_destination_ids: string[]
+  }
+  allowed_destination_ids: string[]
+  status: 'retained' | 'stranded' | 'baseline_unreachable'
+  baseline_route?: ResilienceRoute | null
+  disrupted_route?: ResilienceRoute | null
+  detour_m?: number | null
+}
+
+export interface ResilienceAnalysis {
+  status: string
+  claim_scope: string
+  assumption: {
+    flood_return_period_years?: 100 | 1000 | null
+    treat_flood_exposure_as_unavailable: boolean
+    roadworks_segment_ids: string[]
+    unavailable_segment_ids: string[]
+    analytically_passable_segment_ids: string[]
+  }
+  summary: {
+    origins: number
+    retained: number
+    stranded: number
+    baseline_unreachable: number
+    unavailable_segments: number
+    effective_unavailable_private_car_segments?: number
+    source_unavailable_segments?: number
+    weak_components: number
+  }
+  access: ResilienceAccessRecord[]
+}
+
+export interface ResilienceOrigin {
+  id: string
+  label: string
+  node_id: string
+  point: Coordinate
+  requested_point: Coordinate
+  snap_distance_m: number
+  address_count: number
+  street_names: string[]
+  source: string
+  aggregation: string
+}
+
+export interface ResilienceGatewayGroup {
+  id: string
+  label: string
+  direction: string
+  point: Coordinate
+  destination_count: number
+  destination_ids: string[]
+  definition: string
+}
+
+export interface ResilienceDecisionGroup {
+  id: string
+  label: string
+  segment_ids: string[]
+  segment_count: number
+  name?: string | null
+  highway?: string | null
+  length_m: number
+  vertical_review: boolean
+  point: Coordinate
+  semantics: string
+  cost?: number
+}
+
+export interface ResilienceScenario {
+  schema_version: string
+  id: 'otaniemi-access-v1'
+  name: string
+  description: string
+  snapshot_id: string
+  source_timestamp?: string | null
+  center: Coordinate
+  bbox: [number, number, number, number]
+  core_boundary: Geometry
+  network_context_boundary: Geometry
+  base_network: FeatureCollection
+  buildings: FeatureCollection
+  flood_exposure: FeatureCollection
+  origins: ResilienceOrigin[]
+  gateway_groups: ResilienceGatewayGroup[]
+  decision_groups_by_return_period: Record<'100' | '1000', ResilienceDecisionGroup[]>
+  default_disruption_analysis: ResilienceAnalysis
+  analysis_presets: {
+    teaching_focus: ResilienceAnalysisPreset
+    all_origins_sensitivity: ResilienceAnalysisPreset
+  }
+  defaults: {
+    flood_return_period_years: 100 | 1000
+    treat_flood_exposure_as_unavailable: boolean
+    origin_ids: string[]
+    gateway_group_ids: string[]
+    analytical_repair_budget: number
+    timeout_seconds: number
+  }
+  counts: {
+    nodes: number
+    directed_edges: number
+    physical_segments: number
+    private_car_physical_segments: number
+    municipal_address_points_in_core: number
+    origin_clusters: number
+    gateway_groups: number
+    municipal_buildings: number
+    private_car_exposed_segments: Record<'100' | '1000', number>
+    source_exposed_segments: Record<'100' | '1000', number>
+    [key: string]: unknown
+  }
+  semantics: Record<string, unknown>
+  attribution: string
+}
+
+export interface ResilienceAnalysisPreset {
+  label: string
+  origin_ids: string[]
+  gateway_group_ids: string[]
+  purpose: string
+}
+
+export interface ResilienceSolveRequest {
+  scenario_id: 'otaniemi-access-v1'
+  flood_return_period_years: 100 | 1000
+  treat_flood_exposure_as_unavailable: boolean
+  roadworks_segment_ids: string[]
+  origin_ids: string[]
+  gateway_group_ids: string[]
+  analytical_repair_budget: number
+  timeout_seconds: number
+}
+
+export interface ResilienceSolveEvent {
+  type: string
+  solve_id?: string
+  iteration?: number
+  message?: string
+  selected_decision_ids?: string[]
+  selected_segment_ids?: string[]
+  frontier_decision_ids?: string[]
+  frontier_segment_ids?: string[]
+  reachable_segment_ids?: string[]
+  witness_segment_ids?: string[]
+  learned_clause_ids?: string[]
+  constraint_expression?: string
+  origin_id?: string
+  origin_label?: string
+  route?: Feature<Geometry>
+  diagnostic_route?: ResilienceRoute
+  access_summary?: ResilienceAnalysis['summary']
+  access?: ResilienceAccessRecord[]
+  result?: ResilienceSolveResult
+  [key: string]: unknown
+}
+
+export interface ResilienceSolveResult {
+  status: ResilienceResultStatus
+  verified: boolean
+  message: string
+  solve_id: string
+  scenario_id: string
+  snapshot_id: string
+  elapsed_ms: number
+  iteration_count: number
+  selected_decision_ids?: string[]
+  selected_segment_ids?: string[]
+  selected_decisions?: ResilienceDecisionGroup[]
+  objective_values?: Record<string, number>
+  verification?: {
+    verified: boolean
+    method: string
+    origin_access: Record<string, boolean>
+    unavailable_segment_count: number
+  }
+  analysis?: ResilienceAnalysis
+  baseline_disruption_analysis?: ResilienceAnalysis
+  origin_ids: string[]
+  gateway_group_ids: string[]
+  decision_groups: ResilienceDecisionGroup[]
+  constraint_model?: Record<string, unknown>
+  diagnostics?: Record<string, unknown>
+  methodology_notice: string
+  [key: string]: unknown
+}
+
 export function asFeatureCollection(features?: Array<Feature<Geometry>>): FeatureCollection {
   return { type: 'FeatureCollection', features: features ?? [] }
 }

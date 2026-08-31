@@ -15,6 +15,10 @@ import type {
   BuilderJob,
   BuilderPreflight,
   BuilderSelection,
+  ResilienceScenario,
+  ResilienceSolveEvent,
+  ResilienceSolveRequest,
+  ResilienceSolveResult,
 } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? '/api'
@@ -440,4 +444,118 @@ export async function cancelBuilderJob(jobId: string): Promise<{
     headers: { Accept: 'application/json' },
   })
   return builderJson(response, 'Build cancellation')
+}
+
+export async function getResilienceScenario(signal?: AbortSignal): Promise<ResilienceScenario> {
+  const response = await fetch(`${API_BASE}/resilience/scenario`, {
+    headers: { Accept: 'application/json' },
+    signal,
+  })
+  return builderJson<ResilienceScenario>(response, 'Otaniemi resilience scenario')
+}
+
+function resilienceEvent(rawValue: unknown): ResilienceSolveEvent {
+  const raw = (rawValue ?? {}) as Record<string, unknown>
+  return {
+    ...raw,
+    type: String(raw.type ?? 'data_error'),
+    solve_id: raw.solve_id == null ? undefined : String(raw.solve_id),
+    iteration: raw.iteration == null ? undefined : Number(raw.iteration),
+    message: raw.message == null ? undefined : String(raw.message),
+    selected_decision_ids: Array.isArray(raw.selected_decision_ids)
+      ? raw.selected_decision_ids.map(String)
+      : undefined,
+    selected_segment_ids: Array.isArray(raw.selected_segment_ids)
+      ? raw.selected_segment_ids.map(String)
+      : undefined,
+    frontier_decision_ids: Array.isArray(raw.frontier_decision_ids)
+      ? raw.frontier_decision_ids.map(String)
+      : undefined,
+    frontier_segment_ids: Array.isArray(raw.frontier_segment_ids)
+      ? raw.frontier_segment_ids.map(String)
+      : undefined,
+    reachable_segment_ids: Array.isArray(raw.reachable_segment_ids)
+      ? raw.reachable_segment_ids.map(String)
+      : undefined,
+    witness_segment_ids: Array.isArray(raw.witness_segment_ids)
+      ? raw.witness_segment_ids.map(String)
+      : undefined,
+    learned_clause_ids: Array.isArray(raw.learned_clause_ids)
+      ? raw.learned_clause_ids.map(String)
+      : undefined,
+    constraint_expression: raw.constraint_expression == null
+      ? undefined
+      : String(raw.constraint_expression),
+    origin_id: raw.origin_id == null ? undefined : String(raw.origin_id),
+    origin_label: raw.origin_label == null ? undefined : String(raw.origin_label),
+    result: raw.result as ResilienceSolveResult | undefined,
+  }
+}
+
+export async function streamResilienceSolve(
+  request: ResilienceSolveRequest,
+  onEvent: (event: ResilienceSolveEvent) => void,
+  signal?: AbortSignal,
+): Promise<ResilienceSolveResult | undefined> {
+  const response = await fetch(`${API_BASE}/resilience/solve`, {
+    method: 'POST',
+    headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal,
+  })
+  if (!response.ok) {
+    throw new ApiError(
+      `Resilience solve failed (${response.status})`,
+      response.status,
+      await response.text(),
+    )
+  }
+  if (!response.body) throw new ApiError('Resilience solve did not include a progress stream')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let pending = ''
+  let result: ResilienceSolveResult | undefined
+  const consume = (block: string) => {
+    const data = block
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n')
+    if (!data || data === '[DONE]') return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(data)
+    } catch {
+      onEvent({ type: 'data_error', message: 'The resilience stream was unreadable.' })
+      return
+    }
+    const event = resilienceEvent(parsed)
+    if (event.result) result = event.result
+    onEvent(event)
+  }
+  while (true) {
+    const { done, value } = await reader.read()
+    pending += decoder.decode(value, { stream: !done })
+    const blocks = pending.split(/\r?\n\r?\n/)
+    pending = blocks.pop() ?? ''
+    blocks.forEach(consume)
+    if (done) break
+  }
+  if (pending.trim()) consume(pending)
+  return result
+}
+
+export async function cancelResilienceSolve(solveId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/resilience/solve/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ solve_id: solveId }),
+  })
+  if (!response.ok && response.status !== 404) {
+    throw new ApiError(
+      `Resilience cancellation failed (${response.status})`,
+      response.status,
+      await response.text(),
+    )
+  }
 }

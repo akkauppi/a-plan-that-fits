@@ -1,46 +1,56 @@
 import { expect, test, type Page } from '@playwright/test'
 
-test('preflights frozen Otaniemi and picks a custom location on the map', async ({ page }, testInfo) => {
-  // This integration story deliberately replays and independently validates the
-  // full frozen OSM graph. Simultaneous Chromium, Vite, and API load can make the
-  // cold rebuild substantially slower than its standalone runtime, so keep the
-  // observed worst-case allowance local to this test.
-  testInfo.setTimeout(420_000)
+test('shows the GIS-to-constraint refinement and verifies Otaniemi access', async ({ page }, testInfo) => {
+  // This story deliberately captures four rendered map states on both desktop
+  // and emulated tablet hardware. Leave headroom for software WebGL in CI;
+  // individual solve assertions retain their much tighter 30-second limits.
+  testInfo.setTimeout(240_000)
   const browserErrors = monitorBrowserErrors(page)
   await page.goto('/')
 
-  await expect(page.getByRole('heading', { name: /Keep the coast reachable/i })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Otaniemi network evidence' })).toBeVisible()
-  await expect(page.getByText('Otaniemi coast, Espoo')).toBeVisible()
-  await expect(page.locator('.build-summary').getByText('Verified')).toBeVisible({ timeout: 120_000 })
-  await expect(page.locator('.source-readiness').getByText('National Land Survey of Finland Elevation Model 2 m')).toBeVisible()
-  await expect(page.getByText('Raster archived')).toBeVisible()
-  await expect(page.getByText('4 archived')).toBeVisible()
-  await expect(page.getByText('SYKE coastal flood zones')).toBeVisible()
-  await expect(page.getByText('City of Espoo municipal context')).toBeVisible()
-  await expect(page.getByText('Key needed')).toHaveCount(0)
-  await expect(page.getByText(/Source presence does not establish flooding, road closure, or passability/i)).toBeVisible()
-  await expect(page.getByText('User source')).toBeVisible()
-  await expect(page.getByText('892 segments')).toBeVisible()
-  await expect(page.getByText('1,608 segments')).toBeVisible()
-  await page.screenshot({ path: screenshotPath('builder-otaniemi', testInfo.project.name) })
+  await expect(page.getByRole('heading', { name: /See what stays reachable/i })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible()
+  await expect(page.getByLabel(/Interactive resilience analysis map/i)).toHaveAttribute('data-map-ready', 'true')
+  await expect(page.getByRole('button', { name: 'Verified', exact: true })).toBeDisabled()
+  await expect(page.getByText('15 representative 500 m cells')).toBeVisible()
+  await page.screenshot({ path: screenshotPath('resilience-before', testInfo.project.name) })
 
-  if (!testInfo.project.name.includes('tablet')) {
-    await page.getByRole('button', { name: /Rebuild from frozen archive/i }).click()
-    await expect(page.getByText('Base network ready')).toBeVisible({ timeout: 360_000 })
-    await expect(page.getByText('base-c8dcbcfaca2b2c9498420681')).toBeVisible()
-  }
+  await page.getByRole('button', { name: /Solve access with 4/i }).click()
+  await expect(page.getByText('Live solve trace')).toBeVisible()
+  await expect(page.getByText(/directed frontier/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Access verified under this model' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('3 zones')).toBeVisible()
+  await expect(page.getByText('21 links')).toBeVisible()
+  await expect(page.getByText('+1,093 m')).toBeVisible()
 
-  await page.getByText('Custom Finland location', { exact: true }).click()
-  const locator = page.getByRole('img', { name: /Location map centred/i })
-  await expect(locator).toBeVisible()
-  const before = await page.getByLabel('Longitude').inputValue()
-  await locator.click({ position: { x: 120, y: 72 } })
-  await expect.poll(() => page.getByLabel('Longitude').inputValue()).not.toBe(before)
-  await page.getByRole('button', { name: 'Check bounds & sources' }).click()
-  await expect(page.getByText('Archive needed')).toBeVisible()
-  await expect(page.getByText('Live refresh required')).toBeVisible()
-  await page.screenshot({ path: screenshotPath('builder-location', testInfo.project.name) })
+  await page.locator('.resilience-trace li button').filter({ hasText: /directed frontier/i }).last().click()
+  await expect(page.getByText('Learned-clause frontier')).toBeVisible()
+  await expect(page.getByText('Diagnostic route')).toBeVisible()
+  await expect(page.getByText('Z3 candidate · not verified')).toBeVisible()
+  await page.screenshot({ path: screenshotPath('resilience-refinement', testInfo.project.name) })
+
+  await page.getByRole('button', { name: 'Verified', exact: true }).click()
+  await page.locator('.resilience-result').evaluate((element) => element.scrollIntoView({ block: 'center' }))
+  await page.screenshot({ path: screenshotPath('resilience-verified', testInfo.project.name) })
+
+  await page.getByRole('button', { name: /Open constraint workbench/i }).click()
+  await expect(page.getByRole('heading', { name: 'From spatial evidence to a checked answer' })).toBeVisible()
+  await page.locator('.constraint-trace li button').filter({ hasText: /directed frontier/i }).last().click()
+  await expect(page.getByText('Clause added in the selected iteration')).toBeVisible()
+  await expect(page.getByText(/least-disrupted route helps explain the failure/i)).toBeVisible()
+  await expect(page.locator('.constraint-workbench code').filter({ hasText: /passable\[/ }).first()).toBeVisible()
+  await page.screenshot({ path: screenshotPath('constraint-workbench', testInfo.project.name) })
+  await page.getByRole('button', { name: 'Other questions' }).click()
+  await expect(page.getByRole('heading', { name: /reasoning loop stays recognisable/i })).toBeVisible()
+  await page.getByRole('button', { name: 'Close constraint workbench' }).last().click()
+
+  await page.getByRole('button', { name: 'How solvers differ' }).click()
+  await expect(page.getByRole('heading', { name: /route finder searches a network/i })).toBeVisible()
+  await expect(page.getByText(/routing tells us whether a proposed network works/i)).toBeVisible()
+  await page.screenshot({ path: screenshotPath('solver-comparison', testInfo.project.name) })
+  const proofBoundary = page.getByRole('heading', { name: /verified model answer is not a forecast/i })
+  await proofBoundary.scrollIntoViewIfNeeded()
+  await expect(proofBoundary).toBeVisible()
   expect(browserErrors).toEqual([])
 })
 

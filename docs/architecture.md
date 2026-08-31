@@ -1,23 +1,104 @@
 # Architecture and proof boundary
 
-> **Lifecycle note:** this document describes the completed Four Planters baseline.
-> The accepted successor direction and partially implemented generalization boundary are recorded
-> in the [project status and roadmap](project-status-and-roadmap.md).
+> **Lifecycle note:** this document describes both the completed Four Planters
+> baseline and the first implemented Otaniemi resilience slice. The continuing
+> direction and remaining generalization boundary are recorded in the
+> [project status and roadmap](project-status-and-roadmap.md).
 
 Four Planters is a deliberately small two-process monorepo:
 
 ```text
 browser (React + MapLibre) ── HTTP/SSE ── FastAPI
-                                      ├── Z3 decision model
-                                      ├── NetworkX verifier
-                                      └── frozen scenario JSON
+                                      ├── Kallio filter model
+                                      ├── Otaniemi access model
+                                      ├── Z3 decisions + NetworkX checks
+                                      └── frozen scenario evidence
 ```
 
 The browser is a research instrument and renderer. It never decides that a result
-is valid. FastAPI loads the frozen analytical graph once, and every final result is
+is valid. FastAPI loads the frozen analytical graphs once, and every final result is
 checked against a fresh graph copy before it is assigned a verified state.
 
-## Frozen scenario
+## Otaniemi resilience runtime
+
+The primary workspace is assembled offline from exact frozen artifacts:
+
+```text
+OSM base-c8dcbcfaca2b2c9498420681
+  + Syke flood-bf45a84ac9ce456045f8932b
+  + Espoo espoo-0c59d1ca21a9e918b058 address/building evidence
+  + reviewed gateway node IDs
+  + explicit user availability settings
+  ──> otaniemi-access-v1
+```
+
+The runtime verifies every declared artifact hash before publishing the composite
+scenario ID. Its `snapshot_components` bind the analytical JSON, flood display
+geometry, Espoo manifest, compressed archives, raw GML, and address aggregation/snap
+recipe. This prevents a pointer or municipal archive change from masquerading as
+the same browser scenario.
+
+The 2.743279 km² core has a separate 750 m graph/source context. The base snapshot
+contains 18,710 nodes, 42,077 directed edges, and 21,526 physical segments; 8,048
+physical segments participate in the private-car graph. The flood snapshot records
+892/1,608 source-exposed segments at the 1/100 and 1/1000 tiers. Only 241/528 are
+effective private-car exposure links. Keeping both count families prevents source
+geometry from being confused with a mode-specific closure set.
+
+Espoo's 297 address points inside the core are aggregated into 15 deterministic
+500 m metric cells, then snapped to graph nodes. The runtime checks those
+representatives rather than claiming address-by-address coverage. Four manually
+reviewed outbound context nodes provide named graph exits at Kuusisaarentie,
+Tapiolantie, Kalevalantie, and Kehä I. They are OR destinations—an origin reaches at
+least one selected exit—and are not certified safe locations.
+
+Source exposure becomes unavailable only through an explicit stress assumption:
+
+```text
+unavailable(e) := declared_works(e)
+               OR (stress_assumption_enabled AND exposed(e, tier))
+```
+
+MML elevation is separately attributed terrain/QC evidence and is not an operand in
+this expression. User-clicked roadworks are exact fixed physical-segment IDs, never
+solver-selected recovery actions.
+
+### Otaniemi CEGIS loop
+
+Connected source-exposed OSM fragments are grouped into map-visible continuity
+zones by normalized street name, or by OSM way/highway identity for unnamed links.
+Each group has a Boolean `passable[group_id]`. Z3 minimizes, lexicographically, the
+number of selected groups and their rounded total mapped length, with stable IDs as
+the deterministic tie-break. The returned result expands every group to exact
+physical segment IDs so the budget, aggregation, map, and verifier can be audited.
+
+Reachability itself is a domain-graph requirement, not an eagerly enumerated Z3 path
+formula:
+
+1. Z3 proposes a passable-group assignment satisfying the budget and learned cuts.
+2. NetworkX constructs the directed effective graph and checks each representative
+   against its permitted exit set.
+3. A stranded representative produces two different artifacts: a least-disrupted
+   diagnostic route for visual explanation and the eligible group IDs on the
+   directed reachable frontier.
+4. Only the frontier becomes a sound clause such as
+   `passable[a] OR passable[b]`; the diagnostic route is not a constraint.
+5. Z3 solves the strengthened model. Once all requirements pass, a fresh NetworkX
+   graph reconstructs availability and repeats every directed reachability check.
+
+The default Otaranta→Kuusisaarentie, 1/1000, budget-four teaching case learns three
+singleton frontier clauses and returns three zones / 21 physical fragments / 388 m
+aggregation cost / +1,093 m mapped detour. Singleton cuts make the protocol legible
+but exercise little combinatorial search, so this case is not a solver-performance
+claim. The all-15-representative sensitivity is verified UNSAT at budget four and
+requires five groups.
+
+The browser exposes the same sequence as a map and a constraint workbench:
+map evidence → Boolean variables → budget/learned clauses → NetworkX domain check
+→ fresh checked result. This is designed to explain why a constraint solver is
+useful without pretending that GIS layers arrive as Boolean facts automatically.
+
+## Kallio frozen scenario
 
 `scripts/build_scenario.py` is the provenance-preserving boundary between live OSM
 and the application. The refresh path downloads a bounded Overpass response directly,
@@ -71,7 +152,7 @@ frozen-scenario solver invariant separately establishes exact-four feasibility a
 independent final verification. The intervention budget is an upper bound; the
 default maximum is four.
 
-## Constraint and verification loop
+## Kallio constraint and verification loop
 
 Each eligible physical street location has one Boolean `blocked[candidate_id]`.
 Candidates group reciprocal directed OSM edges so one modal filter affects both
@@ -130,7 +211,18 @@ estimate.
 
 ## Scientific scope
 
-The result establishes only this network statement:
+The Otaniemi result establishes only this network statement:
+
+> Under the frozen directed private-car graph, selected representative origins,
+> reviewed outbound graph exits, declared roadworks, and the explicitly enabled
+> flood-exposure-as-unavailable rule, the reported access relations were recomputed
+> on a fresh directed graph.
+
+It does not establish physical flood closure, safe destinations, individual-address
+access, capacity, public/legal access over a service road, or feasibility of a
+selected continuity treatment.
+
+The Kallio result establishes only this network statement:
 
 > Under the frozen graph, mode, candidate-intervention, and portal assumptions, no
 > private-car route remains between the selected portal pairs.
@@ -140,6 +232,21 @@ assessment, an emergency-services approval, or an operational traffic plan.
 
 ## Known implementation limits
 
+- Otaniemi models a binary private-car connectivity stress test. It does not model
+  water depth at carriageway elevation, hydraulic behaviour, capacity, travel time,
+  independently routed other modes, or emergency response.
+- The Otaniemi decision groups are analytical aggregations of contiguous OSM
+  fragments. Their rounded mapped length is a transparent secondary cost, not a
+  construction cost. Some selected default links are tagged `highway=service`, so
+  OSM access completeness and field/legal review materially affect interpretation.
+- The current Otaniemi teaching case learns singleton frontier clauses. It explains
+  Z3/NetworkX refinement but does not demonstrate an advantage over a specialized
+  shortest-path or cut algorithm.
+- Custom location builds stop at a frozen base network. They do not yet acquire and
+  reconcile all hazard/municipal evidence, review origins/exits, or activate the
+  built graph in the resilience runtime.
+- User-clicked roadworks are fixed link IDs. Imported-works conflation, time buckets,
+  and flexible scheduling are not implemented.
 - The proof graph is the custom deterministic private-car topology derived from the
   frozen Overpass response, not a family of independently constructed OSMnx mode
   graphs.

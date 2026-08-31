@@ -1,36 +1,43 @@
-# Otaniemi resilient-access foundation
+# Otaniemi resilient-access experiment
 
 - **Foundation date:** 2026-08-30
+- **First solver slice:** 2026-08-31
 - **Profile:** `finland-resilient-access-v1`
 - **Pilot:** Otaniemi coastal core, Espoo
-- **Runtime status:** reproducible command-line source, terrain, network, and exposure
-  pipeline plus an Otaniemi-first browser/API base-build workflow; no Otaniemi
-  resilient-access solve yet
+- **Runtime status:** reproducible source, terrain, network, and exposure pipeline;
+  Otaniemi-first browser; streaming Z3/NetworkX access solver; bounded custom-location
+  base builder
 
 ## What exists
 
-The repository now has a second, deliberately separate data path beside the
-completed Kallio Four Planters demonstrator. It accepts a strict versioned recipe,
-uses source-specific adapters with fixed endpoints, freezes their responses by
-checksum, builds a directed multi-mode OSM base network, and intersects that network
-with the published Syke 1/100 and 1/1000 coastal-flood zones. A separate adapter
-freezes the National Land Survey of Finland (MML/NLS) Elevation Model 2 m window for
-terrain and vertical quality review.
+The repository has a second, deliberately separate experiment beside the completed
+Kallio Four Planters demonstrator. It accepts a strict versioned recipe, uses
+source-specific adapters with fixed endpoints, freezes their responses by checksum,
+builds a directed multi-mode OSM base network, and intersects that network with the
+published Syke 1/100 and 1/1000 coastal-flood zones. A separate adapter freezes the
+National Land Survey of Finland (MML/NLS) Elevation Model 2 m window for terrain and
+vertical quality review. City of Espoo address and building evidence supplies the
+origin aggregation and map context.
 
 The separation is intentional:
 
 ```text
 versioned recipe
-  ├─ OSM archive ──> directed base-network snapshot
-  ├─ MML archive ──> elevation QC evidence
-  ├─ Syke archives ─┐
-  └─ Espoo archives ├─> verified source-evidence bundle
-                    └─ Syke + base network ──> exposure-only overlay
+  ├─ OSM archive ─────> directed base-network snapshot
+  ├─ MML archive ────> terrain/QC evidence only
+  ├─ Syke archives ───> clipped exposure-only overlay
+  └─ Espoo archives ──> address representatives + buildings
+
+frozen evidence + explicit stress rule + reviewed graph exits
+  ──> unavailable private-car links
+  ──> Z3 continuity-zone choices
+  ──> NetworkX counterexamples and fresh final verification
 ```
 
-The source bundle is not a graph. The exposure overlay is not an availability
-graph. Neither is loaded by the existing planter solver, and neither supports a
-flood-safe-route claim.
+The source bundle is not a graph, and the exposure overlay is not intrinsically an
+availability graph. The new solver loads both only after the user explicitly elects
+to treat horizontal exposure as private-car unavailability for a stress test. That
+choice supports a scoped graph-access statement, never a flood-safe-route claim.
 
 Implemented contracts and adapters are in `services/scenario_builder/`:
 
@@ -45,6 +52,19 @@ Implemented contracts and adapters are in `services/scenario_builder/`:
   effect, direction, restriction basis, and fixed or flexible schedule;
 - immutable derived snapshots with a checksummed `latest.json` pointer and
   validators that recheck their inputs and contents.
+
+The runtime in `services/solver/otaniemi_resilience.py` adds:
+
+- 15 deterministic 500 m representative origin cells derived from 297 frozen City
+  of Espoo address points inside the core;
+- four reviewed outbound graph endpoints at Kuusisaarentie, Tapiolantie,
+  Kalevalantie, and Kehä I;
+- an explicit private-car availability rule combining the selected Syke tier with
+  user-declared fixed roadworks;
+- visible contiguous exposure zones as Boolean solver decisions;
+- streamed Z3 proposals and NetworkX stranded-origin/frontier counterexamples;
+- a fresh directed-graph verification before any optimal or infeasible result is
+  presented as verified.
 
 The MML adapter uses coverage `korkeusmalli_2m` at the fixed WCS 2.0.1 endpoint
 `https://avoin-karttakuva.maanmittauslaitos.fi/ortokuvat-ja-korkeusmallit/wcs/v2`,
@@ -68,7 +88,7 @@ warnings, start an offline base-network build, follow real event history, and
 request cancellation. The underlying API accepts 100–2,500 m. The canvas is a
 coordinate picker, not a live basemap or place search, so it makes no background
 tile request. A completed job publishes a verified base-network artifact; it does
-not switch the active Kallio solver graph.
+not switch the active Otaniemi resilience graph or the preserved Kallio graph.
 
 ```text
 GET  /api/scenario-builder/catalog
@@ -92,8 +112,10 @@ also validates and summarizes the frozen MML elevation source and Otaniemi
 flood-exposure artifact. Elevation values are terrain/QC evidence and exposure
 numbers are horizontal geometry intersections; neither means passability or a safe
 route. Place search, polygon editing, MML/Syke/Espoo acquisition jobs for a new
-location, flood derivation jobs, and loading a built graph into a resilient-access
-analysis remain outside it.
+location, flood derivation jobs, origin/gateway review, and promotion of a built
+graph into the resilience runtime remain outside it. In other words, location
+selection automates only the bounded base-network stage today, not an end-to-end
+new-location solve.
 
 ## Pilot geometry
 
@@ -198,10 +220,17 @@ public-transport, or service-vehicle semantics. Builder 1.3.0 also excludes 949
 unreferenced nodes (947 OSM nodes and two derived boundary nodes) and prevents a generic
 `access=*` value from promoting an otherwise inappropriate highway/mode pairing.
 
+The loaded browser scenario adds the checked flood and municipal identities to form
+`base-c8dcbcfaca2b2c9498420681+flood-bf45a84ac9ce456045f8932b+espoo-0c59d1ca21a9e918b058`.
+Runtime loading verifies the declared sizes and SHA-256 hashes of base/flood JSON,
+flood display GeoJSON, and the compressed plus raw Espoo address/building GML.
+`snapshot_components` exposes those exact identities and binds the representative
+origin derivation to the same base graph.
+
 The v1 edge permission is nevertheless Boolean. On an otherwise eligible way,
 `access=destination` and `access=delivery` are flattened to “permitted” rather than
 retained as route-purpose constraints. That is suitable for preserving possible
-local access in this foundation, but not for deciding that unrestricted through
+local access in this experiment, but not for deciding that unrestricted through
 movement is legal or intended. A future routing model must contextualize these tags
 for origin/destination access versus through movement before making a through-route
 claim.
@@ -227,6 +256,31 @@ The four replay/build steps can be run in order with:
 ```bash
 make otaniemi-offline
 ```
+
+Run the application and complete verification from the repository root with:
+
+```bash
+make setup
+make otaniemi-offline
+make dev                 # API :8000 and Vite :5173
+
+make lint
+make test                # Python plus frontend lint/type/unit checks
+make build               # strict TypeScript + production Vite build
+make test-e2e            # Playwright desktop/tablet browser stories
+```
+
+Open <http://127.0.0.1:5173>. Ordinary startup and solving use only the frozen local
+artifacts. `make dev` uses API reload for development; the browser never needs the
+MML credential. The committed review captures are:
+
+| State | Desktop | Tablet |
+| --- | --- | --- |
+| Before solve | [desktop](screenshots/four-planters-resilience-before-desktop.png) | [tablet](screenshots/four-planters-resilience-before-tablet.png) |
+| Counterexample/refinement | [desktop](screenshots/four-planters-resilience-refinement-desktop.png) | [tablet](screenshots/four-planters-resilience-refinement-tablet.png) |
+| Verified result | [desktop](screenshots/four-planters-resilience-verified-desktop.png) | [tablet](screenshots/four-planters-resilience-verified-tablet.png) |
+| Constraint workbench | [desktop](screenshots/four-planters-constraint-workbench-desktop.png) | [tablet](screenshots/four-planters-constraint-workbench-tablet.png) |
+| Route solver vs Z3 guide | [desktop](screenshots/four-planters-solver-comparison-desktop.png) | [tablet](screenshots/four-planters-solver-comparison-tablet.png) |
 
 The equivalent explicit commands are:
 
@@ -285,6 +339,12 @@ of normal startup, replay, solving, or validation.
 
 ## Flood overlay semantics
 
+The selected 1/100 and 1/1000 values are Syke's published coastal-flood recurrence
+scenario labels. In the source documentation, 1/100 corresponds to an estimated 1%
+probability in a given year; it does not mean one event occurs regularly every
+century, and neither tier is a forecast for a particular date. The solver preserves
+the labels rather than converting them into probabilities or expected losses.
+
 The overlay treats Syke `syvsuojluokka_id` values 1–5 as mapped terrestrial depth
 bands. It records line/polygon intersection length and share for each physical OSM
 segment, the deepest intersecting published band, source feature IDs, and whether
@@ -292,15 +352,24 @@ OSM `bridge`, `tunnel`, `layer`, `covered`, or `ford` tags require vertical revi
 Published classes for dry land, fixed protection, and waterbody are counted but
 excluded from terrestrial exposure; unknown classes are excluded with a warning.
 
-That output means only:
+That source output means only:
 
 > The horizontal geometry of this frozen OSM segment intersects this frozen Syke
 > hazard polygon under the documented class mapping.
 
 It does not say the road is closed, flooded at carriageway level, traversable by a
-particular mode, or part of a safe route. A future availability model must make
-depth thresholds, vertical separation, uncertainty, mode, and operational decisions
-explicit and independently verify them.
+particular mode, or part of a safe route. The access experiment therefore requires a
+separate, visible user choice before treating exposure as unavailable:
+
+```text
+unavailable(edge) := declared_roadworks(edge)
+                  OR (stress_rule_enabled AND exposed(edge, selected_return_period))
+```
+
+This is a deliberately conservative binary stress rule for explaining network
+dependency. It is not a depth threshold or physical passability model. Disabling the
+rule removes all flood decision variables and closures from the solve. Declared
+roadworks remain fixed unavailable links.
 
 The checked derived snapshot is `flood-bf45a84ac9ce456045f8932b` (builder 1.1.0):
 
@@ -314,6 +383,142 @@ fixed-protection, waterbody, null-boundary, and outside-context source features.
 These figures describe the frozen geometric overlay, not flooded road length at
 carriageway elevation.
 
+Only some source-exposed segments participate in the private-car graph used by the
+experiment:
+
+| Return period | Source-exposed segments | Effective exposed private-car segments |
+| --- | ---: | ---: |
+| 1/100 | 892 | 241 |
+| 1/1000 | 1,608 | 528 |
+
+The browser keeps these concepts separate: blue clipped geometry shows the source
+intersection, while dashed unavailable-link styling appears only when the explicit
+stress rule or declared works makes a private-car segment unavailable.
+
+## Origins and reviewed network exits
+
+The frozen `GIS:Osoitteet` archive contains 297 City of Espoo address points inside
+the study core. For a bounded teaching model, they are grouped by deterministic
+500 m `EPSG:3067` grid cell into 15 representative origins, labelled from their
+member street names and snapped to permitted private-car nodes. Every representative
+lies inside the core; the maximum observed snap distance is 58.48 m. The membership
+count and snap distance remain inspectable in the browser.
+
+This aggregation does **not** mean that 297 addresses are individually verified.
+It omits occupancy, population, vulnerable-user, entrance, parcel, parking, and
+building-specific access semantics. The all-cell preset is an aggregation
+sensitivity check, not a household-access certification.
+
+Four exact outbound nodes at the frozen context edge were manually reviewed against
+the graph and mapped road names:
+
+| Direction | Label | Frozen graph node |
+| --- | --- | --- |
+| East | Kuusisaarentie | `osm-boundary-7b941de776af6b9c` |
+| South | Tapiolantie | `osm-boundary-c97c13269991761e` |
+| West | Kalevalantie | `osm-boundary-3794e75dd2e13051` |
+| North | Kehä I | `osm-boundary-bcf840a7014acbf0` |
+
+They are reviewed outbound network endpoints, not shelters or certified safe
+destinations. If several are selected, the requirement is disjunctive: each origin
+must reach **at least one** selected endpoint.
+
+## Constraint solver and visual refinement
+
+The solver uses one Boolean `passable[decision_group_id]` for each eligible
+continuity zone. A zone groups connected exposed OSM fragments with the same
+normalized street name; unnamed segments are grouped by OSM way/highway continuity.
+Groups are disjoint and map-visible. The primary objective minimizes their count,
+the secondary objective minimizes their rounded summed mapped length in metres, and
+stable IDs break remaining ties. The budget counts groups, while the result also
+reports the exact expanded physical-fragment count. This prevents raw OSM
+segmentation from masquerading as dozens of independent decisions, but the grouping
+is still an analytical convention rather than an engineering project definition.
+
+The reachability requirement is checked by NetworkX rather than encoded as an
+enumeration of all paths in Z3:
+
+1. Z3 proposes a set of `passable[...]` variables under the budget and learned
+   clauses.
+2. NetworkX applies the fixed availability assumptions and proposed continuity
+   zones to the directed graph.
+3. For a stranded origin, the browser receives a least-disrupted diagnostic route
+   and NetworkX computes the eligible decision zones on the directed reachable
+   frontier.
+4. That frontier becomes a necessary clause, for example
+   `passable[zone_a] OR passable[zone_b]`.
+5. Z3 proposes again; the loop ends only when every selected origin reaches at least
+   one selected exit or the accumulated constraints are UNSAT.
+6. A fresh directed NetworkX graph then reconstructs availability and repeats every
+   required reachability check for the final selected zones.
+
+The magenta diagnostic route is visual evidence of why the current proposal fails;
+it is not itself the learned constraint. The orange frontier/continuity zones are
+the Boolean decision units. Timeout, cancellation, data error, and verified UNSAT
+remain distinct terminal states.
+
+The default teaching preset uses the Otaranta representative, East · Kuusisaarentie,
+the 1/1000 tier, the explicit stress rule, no works, budget four, and a 30 second
+deadline. The frozen deterministic result is:
+
+| Metric | Verified result |
+| --- | ---: |
+| continuity-zone commitments | 3 |
+| expanded OSM physical fragments | 21 |
+| aggregation-length cost | 388 m |
+| post-stress route detour | +1,093 m |
+| graph-verifier findings learned | 3 |
+
+The minimum dependency includes mapped service/driveway links without restrictive
+OSM access tags. Their presence is a source-review warning: missing restrictions do
+not prove public or legal access. Moreover, each of the three teaching frontiers is
+a singleton, so the learned clauses force three successive choices. This makes the
+counterexample-guided protocol easy to see but exercises little combinatorial choice;
+it does not demonstrate superiority over shortest-path or cut-specific methods.
+
+The **all-cell sensitivity** preset sends all 15 representatives to the east exit.
+Under the same frozen 1/1000 rule, budget four is verified UNSAT and five continuity
+commitments are required. This difference is valuable precisely because it exposes
+origin and gateway sensitivity. It is not evidence that Otaniemi as a whole is or is
+not resilient.
+
+## Reusing the solver pattern for other GIS questions
+
+The transferable idea is not “put Z3 on a map.” It is a division of labour:
+
+```text
+GIS evidence and policy choices ──> discrete facts and decision candidates
+Z3                              ──> globally consistent choice under budgets/rules
+domain algorithm                ──> find a concrete violated requirement
+counterexample                  ──> compile a necessary clause and repeat
+fresh domain check              ──> verify the final scoped claim
+```
+
+That pattern becomes useful when several spatial requirements and discrete choices
+interact. Examples include:
+
+- scheduling roadworks across time buckets while every critical origin retains one
+  or two routes in each enabled hazard scenario;
+- selecting temporary evacuation links or facility contingencies under equipment,
+  staffing, incompatibility, and per-district coverage constraints;
+- choosing habitat-restoration parcels while a graph/raster verifier discovers
+  species-specific connectivity gaps;
+- coordinating winter-maintenance priorities under fleet, depot, time-window, and
+  minimum-service rules;
+- placing valves or sectionalising actions in a utility network while hydraulic or
+  connectivity checks find customers that remain exposed;
+- selecting public-service locations under capacity, equity, jurisdiction, and
+  travel-threshold constraints, with shortest-path checks producing uncovered demand
+  counterexamples.
+
+The GIS-to-solver translation must always remain inspectable: which source field or
+user choice became a fact, which spatial aggregation became one decision, which
+requirements are hard, which quantities are objectives, and which external
+algorithm verifies them. If a question is only one shortest route or one static
+minimum cut, a specialized graph algorithm is usually clearer and faster. Constraint
+solving earns its role when decisions are coupled across scenarios, modes, time,
+budgets, capacities, and policy rules.
+
 ## Roadworks interchange
 
 There is no live Espoo roadworks adapter. The advertised `GIS:Katutapahtumat` layer
@@ -322,13 +527,21 @@ complete closures by mode and direction. Current roadworks support is consequent
 a validation and canonicalization contract for a frozen, user-supplied GeoJSON
 `FeatureCollection` only.
 
-Each work must have a stable ID and source feature IDs, LineString,
+Each imported work must have a stable ID and source feature IDs, LineString,
 MultiLineString, or Polygon geometry, an explicit `closed` or explained `restricted`
 effect, affected modes, direction, and a timezone-aware fixed or flexible schedule.
 The source declaration must state
 `restriction_interpretation: explicit_declared_effects_only`; generic event or
-permit inference is prohibited. The contract does not yet match works to network
-edges or participate in a solver.
+permit inference is prohibited.
+
+The current browser also supports a narrower interactive experiment: clicking a
+visible base-network segment marks that exact stable physical ID as a declared fixed
+private-car closure for the current solve. Those links are removed before
+continuity-zone grouping and can never be selected back by Z3. This provides a real
+flood-plus-works availability interaction, but it is not a municipal works import,
+geometric conflation, temporal schedule, or operational closure claim. Matching a
+frozen imported work to the graph and choosing flexible time windows remain future
+work.
 
 ## Licences and attribution
 
@@ -349,12 +562,19 @@ analytical step.
 
 ## Next boundary
 
-Before optimization, the project still needs reviewed origins, explicit safe
-destinations, mode-specific impedance, documented flood/roadworks-to-availability
-assumptions, and an independent vulnerability verifier. The location workflow can
-preflight and build a bounded base-network snapshot, but it does not yet turn that
-snapshot into a resilient-access analysis or replace the Kallio graph in the planter
-solver. The most valuable next result is a vulnerability report showing which
-origins lose or retain access under each explicit flood and roadworks scenario, with
-counterexample routes, MML-assisted vertical-review evidence, and uncertainty
-visible. Terrain height must not be converted directly into a home-made flood extent.
+The first access solve is complete, but it is intentionally a binary,
+single-scenario teaching slice. The most valuable next extension is **roadworks
+scheduling across time buckets**: freeze one documented works case with explicit
+mode/direction closure semantics, match it to graph links with reviewable confidence,
+let Z3 choose among genuinely flexible windows, and require each representative to
+retain access in every enabled flood/work time combination. That creates meaningful
+cross-scenario choices rather than three singleton frontier clauses.
+
+Before any operational claim, the project still needs certified or purpose-reviewed
+destinations, mode-specific impedance, road elevation/vertical-separation review,
+works-to-edge conflation, capacity and travel-time semantics, and sensitivity to
+origin aggregation, context, exits, return period, and availability policy. The
+location workflow can preflight and build a bounded base-network snapshot, but does
+not yet acquire/derive all evidence or load a custom graph into the resilience
+runtime. Terrain height must never be converted directly into a home-made flood
+extent.

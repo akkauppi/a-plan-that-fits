@@ -77,24 +77,72 @@ its regression contract while generic infrastructure is extracted for the
 - Method and limitations use the scoped scientific claim and avoid traffic-forecast or legal-feasibility claims.
 - Keyboard focus, reduced motion, desktop, and tablet layouts remain usable.
 
+## Otaniemi resilience obligations
+
+- Runtime references resolve to exact base snapshot
+  `base-c8dcbcfaca2b2c9498420681` and flood snapshot
+  `flood-bf45a84ac9ce456045f8932b`; ordinary startup and solving remain offline.
+- The interface distinguishes 892/1,608 source-exposed segments from the 241/528
+  effective private-car exposure segments at 1/100 and 1/1000.
+- Blue source geometry is the actual clipped line/polygon intersection. Full dashed
+  links mean unavailable under the enabled analytical rule; exposure is never
+  silently labelled a Syke road-closure finding.
+- MML elevation remains separately attributed terrain/QC evidence and is never used
+  to close or reopen a graph link.
+- All 15 representatives derive deterministically from 297 Espoo address points in
+  500 m `EPSG:3067` cells, lie inside the core, resolve to private-car nodes, and
+  have finite snap distances no greater than 60 m. The result does not claim that
+  297 individual addresses were verified.
+- East Kuusisaarentie, south Tapiolantie, west Kalevalantie, and north Kehä I resolve
+  to the exact reviewed outbound nodes. They are described as graph exits, not
+  certified safe destinations; each origin must reach at least one selected exit.
+- The explicit unavailable-link rule is exactly declared roadworks OR (enabled
+  stress assumption AND exposure at the selected tier). Disabling the flood rule
+  yields no flood decisions or selected flood links.
+- Continuity groups are disjoint, map-visible aggregations of effective unavailable
+  private-car fragments. Declared works never become group members. Budgets count
+  groups, objectives report rounded mapped-length cost, and results also report the
+  exact expanded fragment count.
+- Candidate, stranded-origin diagnostic route, directed reachable frontier, learned
+  clause, and final graph check are streamed and can be revisited on the map. The
+  interface distinguishes the diagnostic route from the frontier clause.
+- Z3 variables use `passable[decision_group_id]`. NetworkX checks the reachability
+  requirement and compiles each violation into a sound at-least-one frontier clause;
+  a fresh directed graph verifies every final access relation.
+- The default Otaranta→east, 1/1000 teaching preset verifies three zones, 21 OSM
+  fragments, aggregation-length cost 388 m, and +1,093 m mapped detour. The UI warns
+  when the dependency uses mapped service/driveway links.
+- The all-cell/east sensitivity request is verified UNSAT at budget four and needs
+  five groups. Timeout, cancellation, and data error remain non-UNSAT states.
+- Documentation and the constraint workbench disclose that the teaching run learns
+  three singleton frontiers. It demonstrates the CEGIS protocol, not a comparative
+  Z3 performance advantage.
+- A custom-location builder job publishes only a base-network artifact. It does not
+  silently acquire missing evidence, select exits, or replace the frozen graph in
+  the access runtime.
+- Desktop and tablet screenshots cover before, refinement, verified, constraint
+  workbench, and route-solver-versus-Z3 guide states with visible source attribution.
+
 ## Release checks and evidence
 
-Current combined regression evidence, rerun on 2026-08-31 after the Otaniemi-first
-workspace and frozen MML integration:
+Current combined regression evidence, rerun on 2026-08-31 after the Otaniemi
+resilience solver, visual workbench, and frozen MML integration:
 
-- all 156 Python tests passed, including the credential/redirect, canonical archive,
-  offline replay, integrity, scenario-builder, solver, and Helsinki/Otaniemi invariant
-  cases;
+- all 190 Python tests passed, including the credential/redirect, canonical archive,
+  offline replay, integrity, scenario-builder, generic resilience solver,
+  Otaniemi API/graph invariants, and Helsinki invariant cases;
 - Kallio preprocessing, Otaniemi base-network, flood-exposure, and MML elevation
   validators passed, and `make otaniemi-offline` reproduced the checked snapshot IDs;
-- frontend lint and strict typecheck passed, all 32 Vitest cases passed, and the
-  production build passed with only the documented MapLibre chunk advisory;
-- all ten Playwright desktop/tablet stories passed in 4.8 minutes, including the
-  Otaniemi source workflow, real offline base rebuild, custom location, solver
-  refinement, alternatives, street locking, verified UNSAT, timeout, and cancellation;
+- Python Ruff, frontend lint and strict typecheck passed, all 35 Vitest cases passed,
+  and the production build passed with only the documented MapLibre chunk advisory;
+- all ten Playwright desktop/tablet stories passed, including the Otaniemi access
+  map, streamed refinement, verified result, constraint explanation, and preserved
+  Kallio solver states; the source/custom-location drawer remains covered by three
+  frontend component cases and its earlier committed browser captures;
 - the full browser stories reported no console/page errors and regenerated the
-  desktop/tablet screenshot set, which was visually inspected for the new hierarchy,
-  readable MML evidence, attribution, and responsive stacking.
+  desktop/tablet screenshot set, which was visually inspected for the resilience
+  map hierarchy, live diagnostic route, continuity-zone result, constraint
+  workbench, attribution, and responsive stacking.
 
 Historical Four Planters baseline release evidence from 2026-08-28:
 
@@ -117,11 +165,13 @@ tree:
 - End-to-end main story and infeasible-state tests pass.
 - Firefox console contains no material errors.
 - Curated desktop and tablet screenshots are present under `docs/screenshots/` for
-  [before](screenshots/four-planters-before-desktop.png),
-  [verified](screenshots/four-planters-verified-desktop.png),
-  [comparison](screenshots/four-planters-compare-desktop.png), and
-  [UNSAT](screenshots/four-planters-unsat-desktop.png), with corresponding `-tablet`
-  files. These are committed release evidence and are regenerated by the Playwright
-  main-story run.
+  resilience [before](screenshots/four-planters-resilience-before-desktop.png),
+  [refinement](screenshots/four-planters-resilience-refinement-desktop.png),
+  [verified](screenshots/four-planters-resilience-verified-desktop.png), and the
+  [constraint workbench](screenshots/four-planters-constraint-workbench-desktop.png),
+  the [route solver vs Z3 guide](screenshots/four-planters-solver-comparison-desktop.png),
+  and the preserved Kallio before/verified/comparison/UNSAT states, with corresponding
+  tablet files. These are committed release evidence and are regenerated by the
+  Playwright main-story run.
 - The passing production build may retain Vite's large-chunk advisory; record it as a
   known load-performance limitation rather than treating it as a failed build.

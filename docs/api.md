@@ -106,12 +106,98 @@ active Z3 check and is also observed at deterministic graph-analysis boundaries.
 A non-streaming diagnostic endpoint used by tests and command-line verification.
 It has the same request and final-result shape as the streaming solve.
 
+## Otaniemi resilient-access API
+
+These endpoints operate on the frozen `otaniemi-access-v1` evidence package. They do
+not infer that source exposure closes a road and do not consume MML terrain in the
+availability model.
+
+### `GET /api/resilience/scenario`
+
+Returns the immutable browser payload for snapshot
+`base-c8dcbcfaca2b2c9498420681+flood-bf45a84ac9ce456045f8932b+espoo-0c59d1ca21a9e918b058`,
+including:
+
+- the core and 750 m network-context boundaries;
+- 8,048 private-car physical-segment display features and 1,189 Espoo buildings;
+- clipped 1/100 and 1/1000 Syke exposure intersections;
+- 15 representative 500 m cells derived from 297 in-core Espoo address points;
+- four reviewed outbound graph endpoints;
+- map-visible continuity groups for each return period;
+- a precomputed default disruption analysis, teaching/all-cell presets, defaults,
+  source counts, effective private-car counts, attribution, and claim semantics.
+- `snapshot_components` with checked base/flood artifact hashes and the exact Espoo
+  manifest, address, building, query, compressed-archive, and raw-content identities.
+
+The four endpoint groups are an OR set for each origin: access to at least one
+selected destination is required. They are not certified safe destinations.
+
+### `POST /api/resilience/solve`
+
+Accepts:
+
+```json
+{
+  "scenario_id": "otaniemi-access-v1",
+  "flood_return_period_years": 1000,
+  "treat_flood_exposure_as_unavailable": true,
+  "roadworks_segment_ids": [],
+  "origin_ids": ["origin-88bb182e9f"],
+  "gateway_group_ids": ["gateway-east-kuusisaarentie"],
+  "analytical_repair_budget": 4,
+  "timeout_seconds": 30
+}
+```
+
+`treat_flood_exposure_as_unavailable` is the explicit binary stress assumption. If
+false, source exposure remains visible evidence but creates no flood decision
+variables or unavailable links. `roadworks_segment_ids` are exact private-car
+physical links treated as fixed unavailable; they are removed from eligible
+continuity groups. The budget counts grouped continuity commitments, not expanded
+OSM fragments. The API accepts budgets 0–16 and deadlines 1–120 seconds. That
+deadline spans initial disruption analysis, graph construction and route searches,
+every Z3 check, refinement, and fresh verification.
+
+The response is `text/event-stream`. Events expose real analysis state:
+
+- `started`: the availability scenario was compiled;
+- `candidate_found`: Z3 proposed selected decision and expanded segment IDs;
+- `counterexample_found`: NetworkX found a stranded origin, a map-ready diagnostic
+  route, the directed reachable region, and frontier decision IDs;
+- `verified_optimal`, `verified_unsat`, `timeout`, `cancelled`, or `data_error`: the
+  distinct terminal state;
+- the terminal event carries the complete `result`.
+
+The public event's `route`/`witness_segment_ids` are diagnostic visual evidence. The
+sound learned constraint is represented separately by `frontier_decision_ids`,
+`learned_clause_ids`, and `constraint_expression`. For example, a frontier becomes
+`passable[zone_a] ∨ passable[zone_b]`; the diagnostic route is not inserted into
+Z3 as a path clause.
+
+A verified-optimal result includes grouped and expanded selections, the explicit
+objective values, the baseline and post-commitment access analyses, mapped routes and
+detours, the learned constraint model, iteration count/time, and
+`verification.method: "fresh_networkx_directed_graph"`. The default teaching result
+is three groups, 21 expanded fragments, aggregation-length cost 388, and +1,093 m
+mapped detour. These are model outputs, not project cost, road safety, capacity, or
+legal-access findings.
+
+A verified-UNSAT result means no assignment within the encoded continuity-group
+budget satisfies all learned necessary access-frontier clauses, or that a stranded
+frontier has no eligible group. Timeout and cancellation make no infeasibility claim.
+
+### `POST /api/resilience/solve/cancel`
+
+Accepts `{ "solve_id": "…" }`. Cancellation is cooperative across Z3 and graph
+boundaries and returns HTTP 202 when the live solve ID is known. A cancelled stream
+terminates as `cancelled`, never `verified_unsat`.
+
 ## Resilient-access scenario-builder API
 
-These endpoints publish verified **base-network artifacts** beside the loaded
-scenario. The browser presents the Otaniemi workspace first, but these endpoints do
-not change the preserved Kallio solver, run the planter model, derive flood
-passability, or claim safe access.
+These endpoints publish verified **base-network artifacts** beside the two loaded
+scenarios. The browser presents the Otaniemi workspace first, but these endpoints do
+not change the preserved Kallio solver or the frozen Otaniemi resilience runtime,
+derive flood availability, review origins/exits, or claim safe access.
 
 ### `GET /api/scenario-builder/catalog`
 

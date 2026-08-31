@@ -198,7 +198,7 @@ export function ScenarioBuilderDrawer({
 
       <p className="builder-lead">
         {variant === 'workspace'
-          ? 'Inspect the frozen Otaniemi evidence or define another bounded Finland study area. Building prepares a graph; it does not yet solve resilient access.'
+          ? 'Inspect the analyzable frozen Otaniemi evidence or define another bounded Finland study area. A custom build currently stops at base-network preparation.'
           : 'Prepare a reproducible base network for flood and roadworks resilience. This does not replace the open Kallio modal-filter solver.'}
       </p>
 
@@ -425,8 +425,9 @@ export function ScenarioBuilderDrawer({
             <div>
               <p>
                 A completed job proves only that a bounded, checksummed base-network artifact was
-                built and validated. Flood exposure, disruption passability, destinations, and
-                resilient access have not yet been solved.
+                built and validated. A custom location does not yet derive flood exposure,
+                representative origins, reviewed gateways, or a resilience solve. The frozen
+                Otaniemi snapshot does.
               </p>
               <p className="builder-attribution">
                 Source data: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> · ODbL 1.0
