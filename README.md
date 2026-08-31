@@ -32,24 +32,27 @@ often close to a small graph cut.
 The accepted next direction is a location-driven **resilient-access** experiment
 combining sourced flood scenarios with planned street works. Its first real,
 reproducible Otaniemi foundation is now checked in beside the baseline: typed
-location recipes, fixed-endpoint OSM/Syke/Espoo adapters, frozen source evidence, a
-directed walking/cycling/private-car base network, an exposure-only coastal-flood
-overlay, and a strict interchange for frozen user-supplied roadworks. See the
+location recipes, fixed-endpoint OSM/MML/Syke/Espoo adapters, frozen source evidence,
+a directed walking/cycling/private-car base network, an exposure-only coastal-flood
+overlay, a 2 m terrain-quality-control raster, and a strict interchange for frozen
+user-supplied roadworks. See the
 [foundation and provenance](docs/resilient-access-foundation.md) and the
 [project decision and roadmap](docs/project-status-and-roadmap.md).
 
-The separation remains important. The planter solver and its default map still use
-the verified Kallio dataset. The Otaniemi artifacts do not yet define safe
-destinations, convert flood exposure to road closure, perform resilient-access
-routing, or enter the Z3 model.
+The separation remains important. The browser now opens the **Otaniemi
+resilient-access research workspace first**, while the verified Kallio planter map
+and solver remain available from the experiment switcher as the completed baseline.
+The Otaniemi artifacts do not yet define safe destinations, convert flood exposure or
+terrain height to road closure, perform resilient-access routing, or enter the Z3
+model.
 
-A separate **Study area** drawer exposes the first bounded builder workflow: frozen
+A dedicated Otaniemi workspace exposes the first bounded builder workflow: frozen
 Otaniemi or a clickable Finland point/radius canvas with precise coordinate fields,
 source-readiness preflight, background offline base-network build, real progress
 history, cancellation, and an explicitly acknowledged live OSM refresh. The preset
-also surfaces the independently verified 1/100 and 1/1000 flood-exposure counts,
-without turning exposure into road closure. Building a snapshot never replaces the
-active Kallio solver graph.
+also surfaces the independently verified MML elevation archive and 1/100 and 1/1000
+flood-exposure counts, without turning terrain or exposure into road closure.
+Building a snapshot never replaces the Kallio solver graph.
 
 ## Run locally
 
@@ -78,6 +81,7 @@ The Otaniemi foundation also has a complete offline replay path:
 
 ```bash
 make otaniemi-offline          # verify sources, rebuild base network, derive exposure
+make otaniemi-elevation        # verify/replay the frozen MML elevation window
 make otaniemi-base-validate
 make otaniemi-flood-validate
 ```
@@ -87,10 +91,13 @@ Its network and source refreshes are intentionally separate opt-in commands:
 ```bash
 make otaniemi-base-refresh       # contacts Overpass
 make otaniemi-sources-refresh    # contacts Syke and Espoo WFS
+make otaniemi-elevation-refresh  # reads MML_API_KEY from local .env; contacts MML WCS
 ```
 
 Normal startup, solving, `make data`, and every non-refresh Otaniemi command remain
-offline. Exact CLI forms and artifact paths are documented in the
+offline. Copy `.env.example` to the Git-ignored `.env` and set the key only when an
+explicit MML refresh is intended; credentials are neither needed nor read during
+offline replay. Exact CLI forms and artifact paths are documented in the
 [Otaniemi foundation guide](docs/resilient-access-foundation.md).
 
 Refreshing the source snapshot is intentional and networked:
@@ -150,13 +157,22 @@ timestamp `2026-08-30T09:57:36Z`; the compact derived snapshot
 `base-c8dcbcfaca2b2c9498420681` contains 18,710 nodes, 42,077 directed edges, and
 21,526 physical display segments.
 
-The checked source-evidence bundle also contains the published Syke 1/100 and
-1/1000 sea-flood layers (archived features report a `muutospvm` change date of
-2025-11-18; 3,288 buffered-query features)
-and six City of Espoo WFS layers (35,471 buffered-query features). Those totals are
-source observations, not graph counts or proof of complete spatial coverage. The
-Espoo response timestamps are not dataset edition dates. OSM is ODbL 1.0; the
-checked Syke and Espoo material is CC BY 4.0 with source-specific attribution.
+The checked source evidence also contains the published Syke 1/100 and 1/1000
+sea-flood layers (archived features report a `muutospvm` change date of 2025-11-18;
+3,288 buffered-query features), six City of Espoo WFS layers (35,471 buffered-query
+features), and a separately archived National Land Survey of Finland Elevation Model
+2 m window. The MML WCS 2.0.1 response is a 1,616 × 1,734 ASCII grid in `EPSG:3067`
+with 2,802,144 valid values, no NoData cells, and an observed N2000 (`EPSG:3900`)
+range of −2.266 to 30.116 m. It was acquired at
+`2026-08-30T20:23:48.749054Z` for the snapped context bbox
+`[377872, 6671958, 381104, 6675426]` and is replayed from a checksummed gzip archive.
+
+Those totals and ranges are source observations, not graph counts or proof of
+complete spatial coverage. The Espoo response timestamps are not dataset edition
+dates. OSM is ODbL 1.0; the checked MML, Syke, and Espoo material is CC BY 4.0 with
+source-specific attribution. Elevation is retained only for terrain and vertical
+quality review: it does not establish flooding, closure, passability, or route
+safety.
 
 The flood derivation records horizontal segment/polygon exposure, published depth
 class, source lineage, and bridge/tunnel/layer review flags. It deliberately does
@@ -276,7 +292,7 @@ artefacts:
 
 | State | Desktop | Tablet |
 | --- | --- | --- |
-| Otaniemi sources and exposure | [builder, desktop](docs/screenshots/four-planters-builder-otaniemi-desktop.png) | [builder, tablet](docs/screenshots/four-planters-builder-otaniemi-tablet.png) |
+| Otaniemi-first sources and exposure workspace | [builder, desktop](docs/screenshots/four-planters-builder-otaniemi-desktop.png) | [builder, tablet](docs/screenshots/four-planters-builder-otaniemi-tablet.png) |
 | Custom point/radius selection | [location, desktop](docs/screenshots/four-planters-builder-location-desktop.png) | [location, tablet](docs/screenshots/four-planters-builder-location-tablet.png) |
 | Before solving | [before, desktop](docs/screenshots/four-planters-before-desktop.png) | [before, tablet](docs/screenshots/four-planters-before-tablet.png) |
 | Verified solution | [verified, desktop](docs/screenshots/four-planters-verified-desktop.png) | [verified, tablet](docs/screenshots/four-planters-verified-tablet.png) |

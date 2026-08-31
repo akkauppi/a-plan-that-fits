@@ -439,7 +439,7 @@ def test_default_registry_coverage_uses_injected_clock_without_network() -> None
     registry = default_source_adapter_registry(clock=lambda: FIXED_TIME)
     report, declarations, assessments = assess_source_coverage(recipe, registry=registry)
 
-    assert registry.adapter_ids == ("espoo_wfs", "osm", "syke")
+    assert registry.adapter_ids == ("espoo_wfs", "mml_elevation", "osm", "syke")
     assert [declaration.adapter_id for declaration in declarations] == [
         "osm",
         "syke",

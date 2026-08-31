@@ -3,7 +3,7 @@
 - **Status:** accepted
 - **Decision date:** 2026-08-30
 - **Four Planters baseline:** commit `52fb267`
-- **Provisional successor:** Resilient Access
+- **Successor direction:** Resilient Access
 
 ## Decision
 
@@ -20,28 +20,29 @@ works**. These are two instances of the same network-availability problem:
 - roadworks make edges unavailable or mode-restricted during selected time windows,
   with some timing choices under the planner's control.
 
-The first default study area will move to **Otaniemi, Espoo**, subject to a data and
-network audit. Otaniemi is a deliberately coastal candidate, but its actual hazard
-exposure must be established from sourced flood layers rather than inferred from its
-name, shoreline, or elevation alone.
+The successor workspace now defaults to **Otaniemi, Espoo** after a bounded data and
+network audit. Otaniemi is deliberately coastal, but its actual hazard exposure is
+established from sourced flood layers rather than inferred from its name, shoreline,
+or elevation alone.
 
 The application should also stop treating one checked-in polygon as its only entry
 point. A user should be able to select or draw a study area, inspect data coverage,
 and ask the backend to build a reproducible network scenario for that location.
 
 This decision is now partly implemented. A separate Otaniemi foundation provides
-typed location recipes, fixed-endpoint OSM/Syke/Espoo adapters, real frozen source
-responses, a directed multi-mode OSM network, an exposure-only coastal-flood
-overlay, and a strict frozen roadworks interchange. The current planter map and Z3
-solver still open the frozen Kallio–Vallila scenario; Otaniemi is not yet a
-resilient-access solve. See the
+typed location recipes, fixed-endpoint OSM/MML/Syke/Espoo adapters, real frozen
+source responses, a directed multi-mode OSM network, terrain-quality-control
+evidence, an exposure-only coastal-flood overlay, and a strict frozen roadworks
+interchange. The browser now opens the Otaniemi resilient-access research workspace
+first; the frozen Kallio–Vallila planter map and Z3 solver remain available as the
+completed baseline. Otaniemi is not yet a resilient-access solve. See the
 [foundation architecture and provenance](resilient-access-foundation.md).
 
 The browser now exposes this boundary honestly: a user can select the frozen pilot
 or click/enter a bounded point and radius, inspect verified local source state,
-rebuild a base snapshot asynchronously, and see the verified Otaniemi exposure
-totals. It does not yet turn those totals into unavailable roads or a resilience
-claim.
+rebuild a base snapshot asynchronously, and see the verified Otaniemi elevation and
+exposure evidence. It does not turn terrain values or exposure totals into
+unavailable roads or a resilience claim.
 
 ## Implemented foundation status
 
@@ -52,7 +53,8 @@ partly complete:
 
 - the `finland-resilient-access-v1` recipe accepts bounded point/radius or simple
   polygon cores and records a distinct network-context buffer in `EPSG:3067`;
-- OSM, Syke sea-flood, and six City of Espoo WFS layers have independently
+- OSM, MML Elevation Model 2 m, Syke sea-flood, and six City of Espoo WFS layers
+  have independently
   validated, offline-by-default adapters with fixed endpoints, checksummed raw
   archives, licences, CRS, query, and time records; the derived OSM graph additionally
   records source-field lineage;
@@ -63,6 +65,9 @@ partly complete:
   `2026-08-30T09:57:36Z`;
 - the Syke 1/100 and 1/1000 and Espoo source responses are frozen and replayable;
   their bundle explicitly remains source evidence, not a derived or safe scenario;
+- the separate MML WCS 2.0.1 archive contains a validated 1,616 × 1,734 native 2 m
+  ASCII grid: 2,802,144 N2000 values, no NoData cells, and an observed range of
+  −2.266 to 30.116 m; it remains terrain/QC evidence only;
 - a flood builder derives segment exposure and vertical-review flags without
   inferring closure, passability, or safety; frozen exposure snapshot
   `flood-bf45a84ac9ce456045f8932b` records 892 exposed segments at 1/100 and
@@ -71,13 +76,14 @@ partly complete:
   affected modes and restriction semantics; no live Espoo operational feed is
   claimed.
 
-MML elevation and topographic adapters are not implemented because programmatic
-access needs an operator API key. Origins, reviewed safe destinations, flood-to-edge
-availability policy, works-to-edge matching, vulnerability verification,
-optimization, and browser integration with the resilient-access solver remain
-future work. Espoo evidence remains separate rather than reconciled into OSM, so a
-field-by-field precedence policy and the final combined-database distribution
-obligations must be decided before that join.
+The MML elevation adapter is implemented, frozen, and replayable without credentials;
+only an explicit refresh reads `MML_API_KEY` from a local ignored `.env`. The MML
+Topographic Database adapter is not implemented. Origins, reviewed safe destinations,
+flood-to-edge availability policy, works-to-edge matching, vulnerability
+verification, optimization, and browser integration with the resilient-access
+solver remain future work. Espoo evidence remains separate rather than reconciled
+into OSM, so a field-by-field precedence policy and the final combined-database
+distribution obligations must be decided before that join.
 
 ## Why the original experiment stops here
 
@@ -162,8 +168,8 @@ arrangements.
 
 ## Otaniemi pilot
 
-Otaniemi is the proposed default, not a hard-coded permanent boundary. The final
-pilot polygon should be selected after inspecting:
+Otaniemi is the successor-workspace default, not a hard-coded permanent boundary.
+The checked pilot polygon was selected after inspecting:
 
 - coastline, low terrain, and the coverage of published flood-hazard scenarios;
 - the directed street, walking, cycling, and emergency-relevant networks;
@@ -202,6 +208,7 @@ exact offline path is:
 
 ```bash
 make otaniemi-sources
+make otaniemi-elevation
 make otaniemi-base
 make otaniemi-flood
 ```
@@ -249,8 +256,9 @@ mistaken for the new build foundation:
   Four Planters solver graph or a complete resilient-access scenario;
 - `services/solver/scenario.py` resolves one fixed derived dataset;
 - `services/solver/api.py` loads one scenario and solver into memory at startup;
-- browser product text, Helsinki status labels, attribution, and intervention
-  vocabulary still assume Four Planters outside the separate study-area builder.
+- the Kallio baseline still uses planter/portal vocabulary by design, while the
+  Otaniemi-first workspace is a source/build instrument and not yet an analysis
+  runtime.
 
 Generalization should replace these assumptions through typed configuration and
 source adapters while keeping the existing fixture byte-reproducible. It should not
@@ -264,7 +272,7 @@ source should silently overwrite another.
 | Source | Role | Current implementation and caution |
 | --- | --- | --- |
 | OpenStreetMap | Routable street/path semantics, one-way and access tags, names, initial topology | Implemented and frozen for Otaniemi. The v1 graph records private-car, walking, and cycling permissions and retains vertical tags, but not turn restrictions, conditional access, barriers, emergency, transit, or service semantics. Generic access no longer promotes an inappropriate highway/mode, but `destination` and `delivery` are still flattened to Boolean permission and must be contextualized before through-routing. Municipal layers do not silently replace its topology. |
-| [National Land Survey of Finland (MML/NLS) Elevation model 2 m](https://www.maanmittauslaitos.fi/en/maps-and-spatial-data/datasets-and-interfaces/product-descriptions/elevation-model-2-m) | Ground elevation, low-point inspection, profiles, and hazard-layer quality checks | Not implemented: programmatic access needs `MML_API_KEY`. Open 2 m raster in `EPSG:3067` with N2000 heights under CC BY 4.0. Elevation alone is not a flood model. |
+| [National Land Survey of Finland (MML/NLS) Elevation model 2 m](https://www.maanmittauslaitos.fi/en/maps-and-spatial-data/datasets-and-interfaces/product-descriptions/elevation-model-2-m) | Ground elevation, low-point inspection, profiles, and hazard-layer quality checks | Implemented as a fixed WCS 2.0.1 `korkeusmalli_2m` adapter and frozen separately under `data/recipes/espoo-otaniemi-coastal-elevation-v1.json`. The query bbox `[377872, 6671958, 381104, 6675426]` in `EPSG:3067` produced 2,802,144 valid 2 m N2000 cells under CC BY 4.0. Offline replay needs no credential; explicit refresh reads `MML_API_KEY` locally. Elevation alone is not a flood model or passability rule. |
 | [MML/NLS Topographic Database](https://www.maanmittauslaitos.fi/en/geopackage) | National fallback for roads, buildings, waterways, and land features | Open GeoPackage/custom-area data may complement OSM. A reconciliation policy and per-feature provenance are required. |
 | [City of Espoo open geographic data](https://www.espoo.fi/en/open-data-of-the-geographic-information-unit) | Street areas, buildings, cycling routes, water features, and selected municipal context | Six WFS layers are implemented as exact frozen GML responses with CC BY 4.0 provenance. The snapshot is enrichment evidence only; source timestamps are response times and coverage remains `unknown`. |
 | [Finnish Environment Institute (Syke) web map services](https://www.syke.fi/en/environmental-data/open-web-services/web-map-services) | Published flood-hazard, inundation, and risk scenarios | The 1/100 and 1/1000 sea-flood layers are frozen and intersected with the base graph as exposure evidence. Passability is not inferred. Syke requires a unique application identifier for long-term or intensive WFS use. |
@@ -386,7 +394,7 @@ verified exposure summary. The picker deliberately uses an offline coordinate
 canvas rather than a live tile dependency. Place search, polygon drawing/editing,
 and loading a built graph into an analysis runtime remain.
 
-### 3. Establish the flood experiment — exposure foundation only
+### 3. Establish the flood experiment — terrain and exposure foundation only
 
 - ingest MML elevation and Syke flood scenarios for the selected polygon;
 - classify edge availability by sourced scenario, with inspectable intersection
@@ -396,9 +404,9 @@ and loading a built graph into an analysis runtime remain.
 - then add only defensible upgrade or temporary-link candidates.
 
 The two audited Syke scenarios are frozen and their horizontal intersections with
-the OSM segments are derived. This stops before availability: MML elevation,
-vertical review, thresholds, origins, destinations, and vulnerability reachability
-are not complete.
+the OSM segments are derived. The exact MML elevation window is also frozen for
+terrain/vertical QA. This stops before availability: raster-to-edge review, explicit
+thresholds, origins, destinations, and vulnerability reachability are not complete.
 
 ### 4. Add roadworks and time — interchange only
 
@@ -452,8 +460,8 @@ fabricated operational data.
 5. Complete the browser path from a successfully built snapshot to an inspectable
    exposure/vulnerability map. Keep an immutable artifact selector so a later live
    refresh cannot silently change an open analysis.
-6. Obtain `MML_API_KEY`, implement the exact elevation-window adapter, and use the
-   raster for vertical/low-point QA rather than home-made flood extents.
+6. Sample the frozen MML raster only for reviewable vertical/low-point QA, keeping
+   Syke as the published hazard source and never deriving a home-made flood extent.
 7. Find and freeze one documented works case with explicit closure semantics, then
    match it to the graph with reviewable confidence and test a first temporal
    interaction.

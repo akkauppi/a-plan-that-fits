@@ -23,8 +23,10 @@ with closure geometry, time windows, and affected modes has been confirmed.
 
 The bounded prototype recommended by this audit was implemented later on the same
 date. Versioned recipes now freeze the polygon and a distinct 750 m context; real
-OSM, Syke, and Espoo observations are archived with checksums; the OSM network and a
-Syke segment-exposure overlay are reproducible offline. See the
+OSM, MML, Syke, and Espoo observations are archived with checksums; the OSM network,
+MML terrain window, and Syke segment-exposure overlay are reproducible offline. The
+browser now opens this Otaniemi research workspace before the preserved Kallio
+planter baseline. See the
 [foundation architecture and provenance](resilient-access-foundation.md) for the
 actual schemas, commands, snapshot identities, feature counts, and proof boundary.
 
@@ -95,7 +97,7 @@ foundation guide.
 
 | Source | Exact-area result | Access and terms | Decision |
 | --- | --- | --- | --- |
-| MML Elevation Model 2 m | Product coverage is national apart from stated outer-archipelago/eastern-border gaps; Otaniemi is within the described geographic coverage. An exact raster window was **not** downloaded in this audit because the service requires an API key. | Open CC BY 4.0 data; free WCS and OGC API Processes access requires a user API key. | Required elevation and quality-control adapter, conditional on configured credentials. Never derive the canonical flood extent from elevation alone. |
+| MML Elevation Model 2 m | The original service audit established product coverage; the subsequent adapter run froze the exact 750 m-context window: 1,616 × 1,734 native 2 m cells, all 2,802,144 valid. | Open CC BY 4.0 data; live WCS access requires a user API key, while the frozen archive replays offline without it. | Implemented terrain and quality-control adapter. Never derive the canonical flood extent, road closure, or route safety from elevation alone. |
 | MML Topographic Database | National product includes roads, buildings, waterways, and terrain; custom-area downloads are supported. Exact Otaniemi features were **not** queried without an API key. | Open CC BY 4.0; programmatic current-data services require an API key. | Optional national comparison/fallback source, not an automatic replacement for OSM or municipal geometry. |
 | Espoo open WFS | Anonymous responses contain dense street/cycling geometry, buildings, addresses, water, and public street areas for the proposed bbox. | The checked catalogue records are CC BY 4.0. WFS layers and update rhythms are published by the city. | Confirmed municipal enrichment and cross-check source. Keep field-level provenance. |
 | Syke sea-flood hazards | Exact polygon intersects every checked basic coastal-flood recurrence layer and its published flooded-road layers. | Open CC BY 4.0. Long-term or intensive application use requires a Syke application identifier. | Canonical hazard source for the prototype. |
@@ -128,20 +130,42 @@ instructions](https://www.maanmittauslaitos.fi/en/rajapinnat/api-avaimen-ohje)
 explicitly include the orthophoto/elevation WCS, Topographic Database OGC API
 Features, and OGC API Processes services.
 
-### Not yet confirmed
+### Implemented elevation observation
 
-- No exact Otaniemi elevation pixels, quality-class tile, delivery timestamp, or
-  checksum were obtained. Anonymous WCS and OGC API Processes requests returned
-  HTTP 401 as documented by the service's authentication model.
+The dedicated recipe
+`data/recipes/espoo-otaniemi-coastal-elevation-v1.json` now drives a fixed-endpoint
+WCS 2.0.1 adapter for coverage `korkeusmalli_2m`. It snapped the context request
+outwards to bbox `[377872, 6671958, 381104, 6675426]` in `EPSG:3067` and acquired
+the response at `2026-08-30T20:23:48.749054Z`. The validated grid has 1,616 columns,
+1,734 rows, 2 m resolution, 2,802,144 valid cells, and no NoData cells. Its N2000
+(`EPSG:3900`) values range from −2.266 m to 30.116 m.
+
+The response is retained as a canonical ASCII grid gzip archive. Reproducibility
+identities are listed below. The acquisition time is the archived delivery time, not
+a dataset-edition date; the response supplied no separate source timestamp.
+
+| Item | SHA-256 |
+| --- | --- |
+| recipe | `57a35e661f305d97a2c924342257bc6c74d75d0df5ef2e58944d8da048939ed2` |
+| compressed archive | `d15a1435762cc18a6fe09b03120108066675833e91544ff4140864e79aaa0153` |
+| canonical raw ASCII | `ffffffcbda7fcf054fb1c051698241c9e4ece4bb8013454e72af1b09119b5fc9` |
+
+The live-refresh target reads `MML_API_KEY` only from a local Git-ignored `.env`,
+uses it as the HTTP Basic username, and does not put it in a URL, archive pointer,
+bundle manifest, browser response, or repository file. `.env.example` contains only
+the placeholder. Offline preflight and replay do not read the credential.
+
+### Still not established by elevation
+
 - The 2 m DEM is suitable for profiles and source-quality checks, but it is not a
   hydraulic model and must not replace Syke's published flood scenarios.
+- The WCS response did not identify the cell-specific MML quality class. Product-level
+  accuracy descriptions therefore cannot be silently assigned to this exact window.
+- The adapter validates source cells but does not yet sample them onto road edges,
+  decide whether any road is closed, or prove passability or safe access.
 - A Topographic Database adapter still needs a field-by-field reconciliation policy.
   Source roads may be useful for comparison and stable cross-references, but cannot
   silently overwrite OSM access, direction, or topology.
-
-The builder should read `MML_API_KEY` only on the server, never send it to the
-browser, and should fail with a specific credential/coverage state rather than
-falling back to a fabricated raster.
 
 ## City of Espoo open geographic data
 
@@ -367,7 +391,10 @@ This was the audit handoff sketch, not the implemented schema. It is retained to
 show the source-role decisions. The authoritative typed schema is implemented in
 `services/scenario_builder/models.py`; the checked recipes are
 `data/recipes/espoo-otaniemi-coastal-base-v1.json` and
-`data/recipes/espoo-otaniemi-coastal-v1.json`.
+`data/recipes/espoo-otaniemi-coastal-v1.json`. The later exact elevation adapter has
+its own authoritative recipe,
+`data/recipes/espoo-otaniemi-coastal-elevation-v1.json`; the historical JSON below
+is not its runtime configuration.
 
 ```json
 {
@@ -468,8 +495,10 @@ show the source-role decisions. The authoritative typed schema is implemented in
   roads, so the experiment is not based on a nominal shoreline label.
 - Espoo supplies dense weekly municipal geometry for streets, cycling, buildings,
   addresses, water, and public street areas.
-- MML supplies a nationally consistent 2 m elevation model and topographic
-  cross-check under an open licence once operator credentials are configured.
+- MML supplies a nationally consistent 2 m elevation model under an open licence;
+  the exact context window is now frozen and replayable. A live refresh still needs
+  operator credentials, and the Topographic Database remains only a candidate
+  cross-check.
 
 ### Not ready
 
@@ -501,8 +530,8 @@ should stay vulnerability-first:
    origins only in the core and require reviewed destinations in the context graph.
 3. Independently verify retained and lost access for the 1/100 and 1/1000 scenarios,
    with counterexample routes and threshold sensitivity.
-4. Add the exact MML Elevation Model 2 m window when `MML_API_KEY` is configured and
-   use it for quality review, not as a replacement flood model.
+4. Sample the frozen MML Elevation Model 2 m window for inspectable vertical and
+   low-point review, not as a replacement flood model or automatic closure rule.
 5. Export an inspectable browser vulnerability dataset. Add optimization only after
    that report and its boundary/destination sensitivity are credible.
 

@@ -1,5 +1,7 @@
 import type { ScenarioSettings } from './types'
 
+export type Experience = 'resilience' | 'baseline'
+
 const safeIds = (value: string | null): string[] =>
   value?.split(',').map(decodeURIComponent).filter(Boolean).slice(0, 100) ?? []
 
@@ -23,8 +25,16 @@ export function settingsFromUrl(fallback: ScenarioSettings, search = window.loca
   }
 }
 
-export function settingsToSearch(settings: ScenarioSettings): string {
+export function experienceFromUrl(search = window.location.search): Experience {
+  return new URLSearchParams(search).get('experience') === 'baseline' ? 'baseline' : 'resilience'
+}
+
+export function settingsToSearch(
+  settings: ScenarioSettings,
+  experience: Experience = 'resilience',
+): string {
   const params = new URLSearchParams()
+  if (experience === 'baseline') params.set('experience', 'baseline')
   if (settings.budget !== 4) params.set('budget', String(settings.budget))
   params.set('pairs', settings.selectedPairKeys.map(encodeURIComponent).join(','))
   if (settings.forced.length) params.set('force', settings.forced.map(encodeURIComponent).join(','))
@@ -36,8 +46,11 @@ export function settingsToSearch(settings: ScenarioSettings): string {
   return query ? `?${query}` : ''
 }
 
-export function replaceSettingsUrl(settings: ScenarioSettings): void {
+export function replaceSettingsUrl(
+  settings: ScenarioSettings,
+  experience: Experience = 'resilience',
+): void {
   const url = new URL(window.location.href)
-  url.search = settingsToSearch(settings)
+  url.search = settingsToSearch(settings, experience)
   window.history.replaceState(null, '', url)
 }

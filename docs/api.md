@@ -109,8 +109,9 @@ It has the same request and final-result shape as the streaming solve.
 ## Resilient-access scenario-builder API
 
 These endpoints publish verified **base-network artifacts** beside the loaded
-scenario. They do not change the active Kallio solver, run the planter model, derive
-flood passability, or claim safe access.
+scenario. The browser presents the Otaniemi workspace first, but these endpoints do
+not change the preserved Kallio solver, run the planter model, derive flood
+passability, or claim safe access.
 
 ### `GET /api/scenario-builder/catalog`
 
@@ -154,6 +155,13 @@ vertical-review counts. Its `scope` is always `exposure_only` and
 `passability_inferred` is always `false`. A custom area without frozen hazard inputs
 returns `not_requested`; missing, incompatible, and invalid artifacts are not shown
 as verified.
+
+The same preset's `sources` list includes the separately validated
+`mml_elevation` archive. It reports `readiness: "archived"`, offline availability,
+acquisition time, and a human-readable 1,616 × 1,734 grid/height-range summary.
+`feature_count` is null because raster cells are not vector features. Preflight does
+not read `MML_API_KEY`, and no elevation value is interpreted as flooding, closure,
+passability, or safety.
 
 ### `POST /api/scenario-builder/jobs`
 

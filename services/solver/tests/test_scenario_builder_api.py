@@ -1,19 +1,92 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
 
+from services.scenario_builder.adapters import SourceAcquisitionContext, source_adapter_workspace
 from services.scenario_builder.base_network import BaseNetworkBuildError
+from services.scenario_builder.mml import MML_API_KEY_ENV, MmlElevationAdapter
+from services.scenario_builder.models import ScenarioRecipe
 from services.solver.api import create_app
-from services.solver.scenario_builder_api import BuilderSelection, ScenarioBuilderService
+from services.solver.scenario_builder_api import (
+    OTANIEMI_ELEVATION_RECIPE,
+    BuilderSelection,
+    ScenarioBuilderService,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def _write_elevation_recipe(recipe_dir: Path) -> ScenarioRecipe:
+    document = {
+        "schema_version": "1.0",
+        "profile_id": "finland-resilient-access-v1",
+        "scenario_id": "otaniemi-elevation-preflight-test-v1",
+        "name": "Otaniemi elevation preflight test",
+        "scenario_type": "resilient_access",
+        "analysis_crs": "EPSG:3067",
+        "network_context_buffer_m": 0,
+        "area": {
+            "kind": "point_radius",
+            "center": {"longitude": 24.8278, "latitude": 60.1834},
+            "radius_m": 100,
+        },
+        "sources": [
+            {
+                "adapter_id": "osm",
+                "role": "base_network",
+                "required": True,
+                "parameters": {},
+            },
+            {
+                "adapter_id": "mml_elevation",
+                "role": "elevation",
+                "required": True,
+                "parameters": {},
+            },
+        ],
+    }
+    recipe_dir.mkdir(parents=True)
+    (recipe_dir / OTANIEMI_ELEVATION_RECIPE).write_text(json.dumps(document), encoding="utf-8")
+    return ScenarioRecipe.model_validate(document)
+
+
+def _ascii_grid_for_url(url: str) -> bytes:
+    subsets = parse_qs(urlsplit(url).query)["subset"]
+    axes: dict[str, tuple[float, float]] = {}
+    for subset in subsets:
+        matched = re.fullmatch(r"([EN])\((-?[0-9.]+),(-?[0-9.]+)\)", subset)
+        assert matched is not None
+        axes[matched.group(1)] = (float(matched.group(2)), float(matched.group(3)))
+    minimum_x, maximum_x = axes["E"]
+    minimum_y, maximum_y = axes["N"]
+    ncols = round((maximum_x - minimum_x) / 2)
+    nrows = round((maximum_y - minimum_y) / 2)
+    rows = [" ".join(["4.5"] * ncols) for _ in range(nrows)]
+    rows[0] = "-9999 " + rows[0].split(" ", 1)[1]
+    return (
+        "\n".join(
+            [
+                f"ncols {ncols}",
+                f"nrows {nrows}",
+                f"xllcorner {minimum_x:.3f}",
+                f"yllcorner {minimum_y:.3f}",
+                "cellsize 2",
+                "NODATA_value -9999",
+                *rows,
+            ]
+        )
+        + "\n"
+    ).encode("ascii")
 
 
 async def _wait_for_job(
@@ -57,11 +130,110 @@ async def test_catalog_and_otaniemi_preflight_are_offline_and_leave_solver_uncha
     assert preflight["offline_build_ready"] is True
     assert {source["adapter_id"] for source in preflight["sources"]} >= {
         "osm",
+        "mml_elevation",
         "syke",
         "espoo_wfs",
     }
+    elevation = next(
+        source for source in preflight["sources"] if source["adapter_id"] == "mml_elevation"
+    )
+    assert elevation["readiness"] == "archived"
+    assert elevation["available_offline"] is True
+    assert elevation["feature_count"] is None
+    assert elevation["acquired_at"] == "2026-08-30T20:23:48.749054+00:00"
+    assert "1,616 x 1,734" in elevation["message"]
+    assert "2,802,144 values; 0 NoData" in elevation["message"]
+    assert "-2.266 to 30.116 m N2000" in elevation["message"]
     assert preflight["semantics"]["flood_passability_inferred"] is False
     assert active["id"] == "synthetic"
+
+
+def test_elevation_preflight_validates_frozen_raster_without_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe_dir = tmp_path / "recipes"
+    source_dir = tmp_path / "source"
+    recipe = _write_elevation_recipe(recipe_dir)
+    declaration = next(source for source in recipe.sources if source.adapter_id == "mml_elevation")
+    workspace = source_adapter_workspace(source_dir, recipe, declaration)
+    monkeypatch.setenv(MML_API_KEY_ENV, "test-key-never-persisted")
+    adapter = MmlElevationAdapter(
+        refresh=True,
+        transport=lambda url, timeout_s, api_key: _ascii_grid_for_url(url),
+    )
+    metadata = adapter.acquire(
+        SourceAcquisitionContext(
+            recipe=recipe,
+            declaration=declaration,
+            workspace=workspace,
+        )
+    )
+    dimensions = metadata.query["grid_dimensions"]
+    monkeypatch.delenv(MML_API_KEY_ENV)
+
+    builder = ScenarioBuilderService(
+        recipe_dir=recipe_dir,
+        source_dir=source_dir,
+        derived_dir=tmp_path / "derived",
+    )
+    result = builder._otaniemi_elevation_source()
+
+    assert result["readiness"] == "archived"
+    assert result["available_offline"] is True
+    assert result["feature_count"] is None
+    assert result["source_timestamp"] is None
+    assert result["acquired_at"] is not None
+    assert f"{dimensions['ncols']:,} x {dimensions['nrows']:,}" in result["message"]
+    assert "NoData" in result["message"]
+    assert "N2000" in result["message"]
+    assert "does not establish flooding" in result["message"]
+    assert "test-key-never-persisted" not in json.dumps(result)
+
+    def fail_if_revalidated(self, context):
+        raise AssertionError("unchanged elevation archive should use its validated summary cache")
+
+    monkeypatch.setattr(MmlElevationAdapter, "acquire", fail_if_revalidated)
+    assert builder._otaniemi_elevation_source() == result
+
+
+def test_elevation_preflight_distinguishes_missing_and_invalid_archives(
+    tmp_path: Path,
+) -> None:
+    recipe_dir = tmp_path / "recipes"
+    source_dir = tmp_path / "source"
+    recipe = _write_elevation_recipe(recipe_dir)
+    builder = ScenarioBuilderService(
+        recipe_dir=recipe_dir,
+        source_dir=source_dir,
+        derived_dir=tmp_path / "derived",
+    )
+
+    missing = builder._otaniemi_elevation_source()
+    assert missing["readiness"] == "credentials_required"
+    assert missing["available_offline"] is False
+    assert missing["feature_count"] is None
+    assert "explicit source refresh" in missing["message"]
+
+    declaration = next(source for source in recipe.sources if source.adapter_id == "mml_elevation")
+    workspace = source_adapter_workspace(source_dir, recipe, declaration)
+    workspace.mkdir(parents=True)
+    pointer = workspace / f"{recipe.scenario_id}.mml-elevation-2m.archive.json"
+    pointer.write_text("{}", encoding="utf-8")
+
+    invalid = builder._otaniemi_elevation_source()
+    assert invalid["readiness"] == "invalid_archive"
+    assert invalid["available_offline"] is False
+    assert invalid["feature_count"] is None
+    assert "integrity validation" in invalid["message"]
+
+    misconfigured = ScenarioBuilderService(
+        recipe_dir=tmp_path / "missing-recipes",
+        source_dir=source_dir,
+        derived_dir=tmp_path / "derived",
+    )._otaniemi_elevation_source()
+    assert misconfigured["readiness"] == "invalid_archive"
+    assert "configuration is invalid" in misconfigured["message"]
 
 
 def test_preflight_distinguishes_corrupt_archive_and_snapshot(tmp_path: Path) -> None:

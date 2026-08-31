@@ -24,6 +24,7 @@ from services.scenario_builder.flood_exposure import (
     FloodExposureBuildError,
     validate_latest_flood_exposure,
 )
+from services.scenario_builder.mml import MmlArchiveError, MmlElevationAdapter
 from services.scenario_builder.models import LonLat, PointRadiusArea, ScenarioRecipe
 from services.scenario_builder.osm import (
     OsmArchiveError,
@@ -40,6 +41,7 @@ DEFAULT_DERIVED_DIR = ROOT / "data" / "derived"
 OTANIEMI_PRESET_ID = "otaniemi-coastal-v1"
 OTANIEMI_BASE_RECIPE = "espoo-otaniemi-coastal-base-v1.json"
 OTANIEMI_SOURCE_RECIPE = "espoo-otaniemi-coastal-v1.json"
+OTANIEMI_ELEVATION_RECIPE = "espoo-otaniemi-coastal-elevation-v1.json"
 
 
 class BuilderRequestModel(BaseModel):
@@ -138,6 +140,7 @@ class ScenarioBuilderService:
             tuple[Any, ...], tuple[str, str, dict[str, Any] | None]
         ] = {}
         self._flood_validation_cache: dict[tuple[Any, ...], dict[str, Any]] = {}
+        self._elevation_validation_cache: dict[tuple[Any, ...], dict[str, Any]] = {}
 
     def _load_recipe(self, filename: str) -> ScenarioRecipe:
         path = (self.recipe_dir / filename).resolve()
@@ -188,8 +191,8 @@ class ScenarioBuilderService:
                     "id": OTANIEMI_PRESET_ID,
                     "name": "Otaniemi coast, Espoo",
                     "description": (
-                        "Frozen low-lying coastal study area with archived OSM, SYKE flood "
-                        "hazard, and City of Espoo context sources."
+                        "Frozen low-lying coastal study area with archived OSM, NLS terrain, "
+                        "SYKE flood-hazard, and City of Espoo context sources."
                     ),
                     "frozen": True,
                     "default_successor": True,
@@ -326,6 +329,129 @@ class ScenarioBuilderService:
                 }
             )
         return sources
+
+    @staticmethod
+    def _elevation_cache_key(
+        recipe: ScenarioRecipe,
+        pointer: Path,
+        workspace: Path,
+    ) -> tuple[Any, ...] | None:
+        pointer_document = _read_json(pointer)
+        archive_name = pointer_document.get("archive_file") if pointer_document else None
+        if not isinstance(archive_name, str) or Path(archive_name).name != archive_name:
+            return None
+        archive = workspace / archive_name
+        try:
+            pointer_stat = pointer.stat()
+            archive_stat = archive.stat()
+            with pointer.open("rb") as stream:
+                pointer_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+            with archive.open("rb") as stream:
+                archive_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+        except OSError:
+            return None
+        return (
+            recipe.sha256(),
+            pointer.resolve().as_posix(),
+            pointer_stat.st_size,
+            pointer_stat.st_mtime_ns,
+            pointer_sha256,
+            archive.resolve().as_posix(),
+            archive_stat.st_size,
+            archive_stat.st_mtime_ns,
+            archive_sha256,
+        )
+
+    def _otaniemi_elevation_source(self) -> dict[str, Any]:
+        """Validate the frozen MML raster without consulting runtime credentials."""
+
+        unavailable = {
+            "adapter_id": "mml_elevation",
+            "name": "National Land Survey elevation",
+            "role": "elevation",
+            "readiness": "credentials_required",
+            "available_offline": False,
+            "feature_count": None,
+            "acquired_at": None,
+            "source_timestamp": None,
+            "spatial_coverage": "unknown",
+            "message": (
+                "No compatible frozen Elevation Model 2 m raster is available. "
+                "Configure MML_API_KEY only for an explicit source refresh; preflight "
+                "never reads the credential."
+            ),
+        }
+        try:
+            recipe = self._load_recipe(OTANIEMI_ELEVATION_RECIPE)
+            declaration = next(
+                source
+                for source in recipe.sources
+                if source.adapter_id == "mml_elevation" and source.role == "elevation"
+            )
+            workspace = source_adapter_workspace(self.source_dir, recipe, declaration)
+            context = SourceAcquisitionContext(
+                recipe=recipe,
+                declaration=declaration,
+                workspace=workspace,
+            )
+            adapter = MmlElevationAdapter(refresh=False)
+            pointer = adapter.archive_pointer_path(context)
+        except (OSError, StopIteration, ValueError) as error:
+            return {
+                **unavailable,
+                "readiness": "invalid_archive",
+                "message": f"Elevation source configuration is invalid: {error}",
+            }
+        if not pointer.is_file():
+            return unavailable
+
+        cache_key = self._elevation_cache_key(recipe, pointer, workspace)
+        with self._lock:
+            cached = self._elevation_validation_cache.get(cache_key) if cache_key else None
+        if cached is not None:
+            return cached.copy()
+
+        try:
+            metadata = adapter.acquire(context)
+            manifest = adapter.archive_manifest
+            assessment = adapter.assess_coverage(recipe)
+            ncols = int(manifest["ncols"])
+            nrows = int(manifest["nrows"])
+            valid_cells = int(manifest["valid_cell_count"])
+            nodata_cells = int(manifest["nodata_cell_count"])
+            minimum = float(manifest["minimum_elevation_m"])
+            maximum = float(manifest["maximum_elevation_m"])
+        except (KeyError, MmlArchiveError, OSError, TypeError, ValueError) as error:
+            return {
+                **unavailable,
+                "readiness": "invalid_archive",
+                "message": f"Frozen elevation raster failed integrity validation: {error}",
+            }
+
+        summary = {
+            "adapter_id": "mml_elevation",
+            "name": "National Land Survey elevation",
+            "role": "elevation",
+            "readiness": "archived",
+            "available_offline": True,
+            # Raster cells are not vector features; expose their counts in the message.
+            "feature_count": None,
+            "acquired_at": metadata.acquired_at.isoformat(),
+            "source_timestamp": metadata.source_timestamp,
+            "spatial_coverage": assessment.status,
+            "message": (
+                f"Frozen 2 m elevation raster validated offline: {ncols:,} x {nrows:,} "
+                f"cells ({valid_cells:,} values; {nodata_cells:,} NoData), with a "
+                f"{minimum:g} to {maximum:g} m N2000 value range. Elevation is "
+                "quality-control evidence only; it does not establish flooding, road "
+                "passability, or route safety."
+            ),
+        }
+        if cache_key is not None:
+            with self._lock:
+                self._elevation_validation_cache.clear()
+                self._elevation_validation_cache[cache_key] = summary.copy()
+        return summary
 
     def _otaniemi_flood_exposure(
         self,
@@ -514,18 +640,7 @@ class ScenarioBuilderService:
             sources.extend(self._otaniemi_context_sources())
             sources.extend(
                 [
-                    {
-                        "adapter_id": "mml_elevation",
-                        "name": "National Land Survey elevation",
-                        "role": "elevation",
-                        "readiness": "credentials_required",
-                        "available_offline": False,
-                        "spatial_coverage": "unknown",
-                        "message": (
-                            "The audited adapter remains optional until MML_API_KEY is "
-                            "configured."
-                        ),
-                    },
+                    self._otaniemi_elevation_source(),
                     {
                         "adapter_id": "roadworks_geojson",
                         "name": "Roadworks interchange",

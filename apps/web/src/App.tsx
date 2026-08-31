@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Feature, LineString } from 'geojson'
 import {
   Accessibility,
+  ArrowRight,
   ArrowLeftRight,
   Ban,
   BookOpenText,
@@ -19,6 +20,7 @@ import {
   Shield,
   Sprout,
   TriangleAlert,
+  Waves,
 } from 'lucide-react'
 import { ApiError, cancelSolve, getScenario, streamSolve } from './api'
 import { BudgetControl } from './components/BudgetControl'
@@ -44,7 +46,8 @@ import type {
 } from './types'
 import { pairKey } from './types'
 import { statusFromResult } from './resultStatus'
-import { replaceSettingsUrl, settingsFromUrl } from './urlState'
+import { experienceFromUrl, replaceSettingsUrl, settingsFromUrl } from './urlState'
+import type { Experience } from './urlState'
 
 const DEFAULT_SETTINGS: ScenarioSettings = {
   budget: 4,
@@ -59,6 +62,7 @@ const DEFAULT_SETTINGS: ScenarioSettings = {
 const ACTIVE_STATUSES: SolveStatus[] = ['solving', 'candidate_found', 'counterexample_found', 'refining']
 
 export function App() {
+  const [activeExperience, setActiveExperience] = useState<Experience>(() => experienceFromUrl())
   const [scenario, setScenario] = useState<Scenario>()
   const [loadError, setLoadError] = useState<string>()
   const [reloadKey, setReloadKey] = useState(0)
@@ -77,7 +81,6 @@ export function App() {
   const [showAccess, setShowAccess] = useState(false)
   const [showMethod, setShowMethod] = useState(false)
   const [showCompare, setShowCompare] = useState(false)
-  const [showBuilder, setShowBuilder] = useState(false)
   const [shareNotice, setShareNotice] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const abortRef = useRef<AbortController | undefined>(undefined)
@@ -107,8 +110,8 @@ export function App() {
   }, [reloadKey])
 
   useEffect(() => {
-    if (scenario) replaceSettingsUrl(settings)
-  }, [scenario, settings])
+    if (scenario) replaceSettingsUrl(settings, activeExperience)
+  }, [activeExperience, scenario, settings])
 
   const allPairs = useMemo(() => scenario ? portalPairsForScenario(scenario) : [], [scenario])
   const isSolving = ACTIVE_STATUSES.includes(status)
@@ -322,26 +325,44 @@ export function App() {
     }
   }
 
-  if (!scenario) {
-    return <LoadingScreen error={loadError} onRetry={() => setReloadKey((value) => value + 1)} />
-  }
-
   return (
-    <div className="app-shell">
+    <div className={`app-shell app-shell--${activeExperience}`}>
       <header className="product-header">
         <a className="brand" href="/" aria-label="Four Planters home">
           <span className="brand-glyph" aria-hidden="true"><i /><i /><i /><i /></span>
-          <span><strong>Four Planters</strong><small>Urban network solver</small></span>
+          <span>
+            <strong>Four Planters</strong>
+            <small>{activeExperience === 'resilience' ? 'Resilient access lab' : 'Modal-filter baseline'}</small>
+          </span>
         </a>
-        <p>Can four small filters stop private-car through-routing while keeping every address connected?</p>
+        <p>
+          {activeExperience === 'resilience'
+            ? 'Can essential destinations remain reachable through coastal flooding and road closures?'
+            : 'Can four small filters stop private-car through-routing while keeping every address connected?'}
+        </p>
         <nav aria-label="Application information">
-          <button type="button" onClick={() => setShowBuilder(true)}><MapPinned size={15} /> Study area</button>
-          <button type="button" onClick={() => setShowMethod(true)}><BookOpenText size={15} /> Method</button>
-          <button type="button" onClick={share}><Share2 size={15} /> {shareNotice ? 'Link copied' : 'Share'}</button>
+          {activeExperience === 'resilience' ? (
+            <button type="button" onClick={() => setActiveExperience('baseline')}>
+              <Sprout size={15} /> Kallio baseline
+            </button>
+          ) : (
+            <>
+              <button type="button" onClick={() => setActiveExperience('resilience')} disabled={isSolving}>
+                <MapPinned size={15} /> Otaniemi experiment
+              </button>
+              <button type="button" onClick={() => setShowMethod(true)}><BookOpenText size={15} /> Method</button>
+              <button type="button" onClick={share}><Share2 size={15} /> {shareNotice ? 'Link copied' : 'Share'}</button>
+            </>
+          )}
         </nav>
       </header>
 
-      <main>
+      {activeExperience === 'resilience' ? (
+        <ResilienceWorkspace onOpenBaseline={() => setActiveExperience('baseline')} />
+      ) : !scenario ? (
+        <LoadingScreen error={loadError} onRetry={() => setReloadKey((value) => value + 1)} />
+      ) : (
+      <main className="baseline-workspace">
         <aside className="instrument-panel" aria-label="Solver controls">
           <div className="panel-scroll">
             <section className="intro-block">
@@ -480,15 +501,10 @@ export function App() {
           )}
         </section>
       </main>
-
-      {showMethod && <><button className="sheet-backdrop" type="button" onClick={() => setShowMethod(false)} aria-label="Dismiss methods overlay" tabIndex={-1} /><Methodology scenario={scenario} onClose={() => setShowMethod(false)} /></>}
-      {showBuilder && (
-        <>
-          <button className="sheet-backdrop" type="button" onClick={() => setShowBuilder(false)} aria-label="Dismiss study-area builder" tabIndex={-1} />
-          <ScenarioBuilderDrawer onClose={() => setShowBuilder(false)} />
-        </>
       )}
-      {showCompare && (
+
+      {showMethod && scenario && <><button className="sheet-backdrop" type="button" onClick={() => setShowMethod(false)} aria-label="Dismiss methods overlay" tabIndex={-1} /><Methodology scenario={scenario} onClose={() => setShowMethod(false)} /></>}
+      {showCompare && scenario && (
         <>
           <button className="sheet-backdrop" type="button" onClick={() => setShowCompare(false)} aria-label="Dismiss comparison overlay" tabIndex={-1} />
           <CompareDrawer
@@ -504,6 +520,67 @@ export function App() {
       )}
       {shareNotice && <div className="toast" role="status"><Link2 size={14} />Scenario link copied</div>}
     </div>
+  )
+}
+
+function ResilienceWorkspace({ onOpenBaseline }: { onOpenBaseline: () => void }) {
+  return (
+    <main className="resilience-workspace">
+      <section className="resilience-narrative" aria-labelledby="resilience-title">
+        <div className="resilience-kicker"><Waves size={15} />Current research experiment · Otaniemi, Espoo</div>
+        <h1 id="resilience-title">Keep the coast reachable when roads fail.</h1>
+        <p className="resilience-lede">
+          Combine frozen street, 2 m terrain elevation, coastal-flood, and municipal evidence to
+          ask which essential destinations remain reachable under explicit disruption scenarios.
+        </p>
+
+        <blockquote>
+          Which roads are exposed—and what access remains if a flood or roadworks event actually
+          closes them?
+        </blockquote>
+
+        <div className="resilience-facts" aria-label="Otaniemi experiment facts">
+          <span><strong>2.743 km²</strong><small>frozen coastal core</small></span>
+          <span><strong>4 source families</strong><small>OSM · NLS · SYKE · Espoo</small></span>
+          <span><strong>Exposure only</strong><small>no closure inferred</small></span>
+        </div>
+
+        <section className="research-sequence" aria-labelledby="research-sequence-title">
+          <h2 id="research-sequence-title">Research sequence</h2>
+          <ol>
+            <li className="is-ready">
+              <i>01</i>
+              <span><strong>Freeze the evidence</strong><small>Bounded network, source provenance, and coastal-flood overlap</small></span>
+              <Check size={15} />
+            </li>
+            <li>
+              <i>02</i>
+              <span><strong>Declare disruptions</strong><small>Roadworks and flood passability must be explicit—not guessed from exposure</small></span>
+            </li>
+            <li>
+              <i>03</i>
+              <span><strong>Solve resilient access</strong><small>Test reachability to essential destinations and explain fragile links</small></span>
+            </li>
+          </ol>
+        </section>
+
+        <button type="button" className="baseline-launch" onClick={onOpenBaseline}>
+          <span className="brand-glyph" aria-hidden="true"><i /><i /><i /><i /></span>
+          <span>
+            <small>Completed baseline instrument</small>
+            <strong>Open the Kallio Four Planters solver</strong>
+          </span>
+          <ArrowRight size={18} />
+        </button>
+
+        <p className="resilience-scope">
+          The Otaniemi workspace is the current experiment. The Kallio modal-filter study remains
+          intact as a completed, reproducible baseline—not the default research direction.
+        </p>
+      </section>
+
+      <ScenarioBuilderDrawer variant="workspace" />
+    </main>
   )
 }
 

@@ -56,7 +56,13 @@ its regression contract while generic infrastructure is extracted for the
 
 ## Interface story
 
-- Initial viewport explains the permeability question, shows four as the budget, and exposes one clear solve action.
+- Initial viewport presents the Otaniemi resilient-access question, source state,
+  research sequence, and a clear route to the preserved Kallio baseline.
+- The frozen Otaniemi preset reports the MML 2 m raster as archived/offline and
+  explicitly labels elevation and flood exposure as evidence rather than closure,
+  passability, or safety.
+- After switching to Kallio, the baseline explains the permeability question, shows
+  four as the budget, and exposes one clear solve action.
 - Boundary, hierarchy, buildings, protected corridors, portals, candidates, and the illustrative existing route are legible.
 - Counterexample routes and model refinements appear as actual streamed solver events.
 - Solver timeout is selectable at 5, 10, 30, 60, or 120 seconds; 30 seconds is the
@@ -73,7 +79,24 @@ its regression contract while generic infrastructure is extracted for the
 
 ## Release checks and evidence
 
-Final 2026-08-28 release evidence:
+Current combined regression evidence, rerun on 2026-08-31 after the Otaniemi-first
+workspace and frozen MML integration:
+
+- all 156 Python tests passed, including the credential/redirect, canonical archive,
+  offline replay, integrity, scenario-builder, solver, and Helsinki/Otaniemi invariant
+  cases;
+- Kallio preprocessing, Otaniemi base-network, flood-exposure, and MML elevation
+  validators passed, and `make otaniemi-offline` reproduced the checked snapshot IDs;
+- frontend lint and strict typecheck passed, all 32 Vitest cases passed, and the
+  production build passed with only the documented MapLibre chunk advisory;
+- all ten Playwright desktop/tablet stories passed in 4.8 minutes, including the
+  Otaniemi source workflow, real offline base rebuild, custom location, solver
+  refinement, alternatives, street locking, verified UNSAT, timeout, and cancellation;
+- the full browser stories reported no console/page errors and regenerated the
+  desktop/tablet screenshot set, which was visually inspected for the new hierarchy,
+  readable MML evidence, attribution, and responsive stacking.
+
+Historical Four Planters baseline release evidence from 2026-08-28:
 
 - deterministic preprocessing validation passed with 1,342 nodes, 2,408 directed
   edges, 272 candidates, 38 analytical portals, 68 crossing records, 182 address

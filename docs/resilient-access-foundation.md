@@ -3,8 +3,9 @@
 - **Foundation date:** 2026-08-30
 - **Profile:** `finland-resilient-access-v1`
 - **Pilot:** Otaniemi coastal core, Espoo
-- **Runtime status:** reproducible command-line source, network, and exposure pipeline
-  plus a browser/API base-build workflow; no Otaniemi resilient-access solve yet
+- **Runtime status:** reproducible command-line source, terrain, network, and exposure
+  pipeline plus an Otaniemi-first browser/API base-build workflow; no Otaniemi
+  resilient-access solve yet
 
 ## What exists
 
@@ -12,13 +13,16 @@ The repository now has a second, deliberately separate data path beside the
 completed Kallio Four Planters demonstrator. It accepts a strict versioned recipe,
 uses source-specific adapters with fixed endpoints, freezes their responses by
 checksum, builds a directed multi-mode OSM base network, and intersects that network
-with the published Syke 1/100 and 1/1000 coastal-flood zones.
+with the published Syke 1/100 and 1/1000 coastal-flood zones. A separate adapter
+freezes the National Land Survey of Finland (MML/NLS) Elevation Model 2 m window for
+terrain and vertical quality review.
 
 The separation is intentional:
 
 ```text
 versioned recipe
   ├─ OSM archive ──> directed base-network snapshot
+  ├─ MML archive ──> elevation QC evidence
   ├─ Syke archives ─┐
   └─ Espoo archives ├─> verified source-evidence bundle
                     └─ Syke + base network ──> exposure-only overlay
@@ -32,7 +36,7 @@ Implemented contracts and adapters are in `services/scenario_builder/`:
 
 - a Finland-v1 scenario recipe for a simple WGS84 polygon or a point and radius,
   with a bounded metric network-context buffer and `EPSG:3067` analysis;
-- offline-by-default OSM, Syke coastal-flood, and Espoo WFS adapters with
+- offline-by-default OSM, MML elevation, Syke coastal-flood, and Espoo WFS adapters with
   content-addressed raw archives, whose endpoints and layer allowlists cannot be
   replaced by recipe URLs;
 - source metadata, field-lineage, licence, checksum, query, CRS, and acquisition
@@ -42,14 +46,21 @@ Implemented contracts and adapters are in `services/scenario_builder/`:
 - immutable derived snapshots with a checksummed `latest.json` pointer and
   validators that recheck their inputs and contents.
 
-There is no MML adapter yet. MML's 2 m elevation model remains a planned
-quality-control input and requires a server-side `MML_API_KEY`. Elevation will not
-replace an official flood-hazard layer.
+The MML adapter uses coverage `korkeusmalli_2m` at the fixed WCS 2.0.1 endpoint
+`https://avoin-karttakuva.maanmittauslaitos.fi/ortokuvat-ja-korkeusmallit/wcs/v2`,
+requests the native 2 m grid in `EPSG:3067`, and validates the complete ASCII
+response before writing a canonical gzip archive. Its API credential is used only
+for an explicit refresh and never appears in the query URL, pointer, bundle, browser
+response, or committed files. The frozen raster is quality-control evidence only.
+It does not replace an official flood-hazard layer or imply road closure,
+passability, or safety.
 
 ## Location workflow
 
-The browser's **Study area** instrument and a small FastAPI job service expose the
-first bounded location workflow. The frozen Otaniemi preset is the default. A user
+The browser now opens an **Otaniemi resilient-access** research workspace first,
+with the completed Kallio planter solver preserved as the switchable baseline. Its
+study-area instrument and a small FastAPI job service expose the first bounded
+location workflow. The frozen Otaniemi preset is the default. A user
 may instead click an offline coordinate canvas or enter a precise Finland WGS84
 longitude/latitude, choose a 500, 750, 1,000, 1,500, or 2,000 m browser radius,
 preflight the resulting recipe, inspect local archive readiness and coverage
@@ -77,11 +88,12 @@ cooperative at safe checkpoints, so an immutable snapshot can finish publishing
 after a late request while still never becoming the active planter scenario.
 
 This v1 browser flow supports the preset and clickable point/radius selection. It
-also validates and summarizes the already-frozen Otaniemi flood-exposure artifact:
-the numbers shown are horizontal geometry intersections, never passability or safe
-routes. Place search, polygon editing, Syke/Espoo acquisition jobs, flood derivation
-jobs for a new location, and loading a built graph into a resilient-access analysis
-remain outside it.
+also validates and summarizes the frozen MML elevation source and Otaniemi
+flood-exposure artifact. Elevation values are terrain/QC evidence and exposure
+numbers are horizontal geometry intersections; neither means passability or a safe
+route. Place search, polygon editing, MML/Syke/Espoo acquisition jobs for a new
+location, flood derivation jobs, and loading a built graph into a resilient-access
+analysis remain outside it.
 
 ## Pilot geometry
 
@@ -124,7 +136,9 @@ The checked-in recipes are:
 - `data/recipes/espoo-otaniemi-coastal-base-v1.json` for the independently frozen
   OSM base-network build;
 - `data/recipes/espoo-otaniemi-coastal-v1.json` for the combined OSM, Syke, and
-  Espoo source declarations.
+  Espoo source declarations;
+- `data/recipes/espoo-otaniemi-coastal-elevation-v1.json` for the separately frozen
+  MML Elevation Model 2 m selection.
 
 Selection-specific source manifests coexist. The normal hazard/context replay
 selects `syke` and `espoo_wfs`; a complete three-source manifest also verifies OSM,
@@ -142,6 +156,7 @@ substituted into the checked base snapshot.
 | Source | Frozen observation | Contents |
 | --- | --- | ---: |
 | OpenStreetMap/Overpass | base timestamp `2026-08-30T09:57:36Z`; acquired `2026-08-30T09:59:33.503935Z`; raw identity `88d79a3217333d77…` | 25,390 source elements |
+| MML Elevation Model 2 m | acquired `2026-08-30T20:23:48.749054Z`; WCS 2.0.1 coverage `korkeusmalli_2m`; raw identity `ffffffcbda7fcf05…` | 1,616 × 1,734 cells; 2,802,144 valid; 0 NoData |
 | Syke 1/100 sea flood | feature `muutospvm` value `2025-11-18`; response `2026-08-30T16:07:06.575Z`; raw identity `ab76b89c567dc131…` | 1,650 features in the buffered query |
 | Syke 1/1000 sea flood | feature `muutospvm` value `2025-11-18`; response `2026-08-30T16:07:08.513Z`; raw identity `58be5d12d8ed8388…` | 1,638 features in the buffered query |
 | Espoo street centrelines | response `2026-08-30T19:07:12+03:00`; raw identity `34e3b98ed1fd39d3…` | 15,038 features |
@@ -155,6 +170,23 @@ The Espoo timestamps are response times, not dataset edition dates. Non-empty WF
 responses also do not prove complete spatial coverage. Both the Syke and Espoo
 adapters retain `spatial_coverage: unknown` with the supporting bounded-query
 evidence instead of converting “unknown” into “full.”
+
+The MML request bbox is snapped outwards to the native grid as
+`[377872, 6671958, 381104, 6675426]` in `EPSG:3067`. The archived values use N2000
+(`EPSG:3900`) and range from −2.266 m to 30.116 m. The ASCII grid is stored as a
+canonical gzip archive. The acquisition time records this delivery, not the DEM's
+dataset edition; the WCS response supplied no source timestamp. Its exact identities
+are:
+
+| Item | SHA-256 |
+| --- | --- |
+| elevation recipe | `57a35e661f305d97a2c924342257bc6c74d75d0df5ef2e58944d8da048939ed2` |
+| compressed archive | `d15a1435762cc18a6fe09b03120108066675833e91544ff4140864e79aaa0153` |
+| canonical raw ASCII payload | `ffffffcbda7fcf054fb1c051698241c9e4ece4bb8013454e72af1b09119b5fc9` |
+
+Negative values in this source are retained observations, not by themselves errors
+or evidence of inundation. The raster has not been sampled onto network edges and
+does not participate in the current exposure derivation.
 
 The current compact OSM snapshot is
 `base-c8dcbcfaca2b2c9498420681` (base-network schema 1.1, builder 1.3.0): 18,710
@@ -182,6 +214,7 @@ checksum is missing rather than silently contacting a service.
 ```bash
 make otaniemi-sources          # verify/replay frozen Syke + Espoo source evidence
 make otaniemi-sources-all      # verify the complete OSM + Syke + Espoo bundle
+make otaniemi-elevation        # verify/replay frozen MML terrain evidence
 make otaniemi-base             # rebuild from the frozen OSM archive
 make otaniemi-flood            # intersect the latest verified base with frozen Syke
 
@@ -189,7 +222,7 @@ make otaniemi-base-validate
 make otaniemi-flood-validate
 ```
 
-The three replay/build steps can be run in order with:
+The four replay/build steps can be run in order with:
 
 ```bash
 make otaniemi-offline
@@ -201,6 +234,10 @@ The equivalent explicit commands are:
 .venv/bin/python scripts/acquire_scenario_sources.py \
   --recipe data/recipes/espoo-otaniemi-coastal-v1.json \
   --adapter syke --adapter espoo_wfs
+
+.venv/bin/python scripts/acquire_scenario_sources.py \
+  --recipe data/recipes/espoo-otaniemi-coastal-elevation-v1.json \
+  --adapter mml_elevation
 
 .venv/bin/python scripts/build_base_network.py \
   --recipe data/recipes/espoo-otaniemi-coastal-base-v1.json
@@ -225,7 +262,18 @@ Network refresh is always explicit and separately scoped:
 ```bash
 make otaniemi-base-refresh       # Overpass only
 make otaniemi-sources-refresh    # Syke and Espoo WFS only
+make otaniemi-elevation-refresh  # MML WCS only; reads MML_API_KEY from local .env
 ```
+
+`make otaniemi-elevation` is fully offline and verifies the pointer, recipe identity,
+gzip archive checksum, ASCII-grid shape, bbox, resolution, cell counts, and value
+range. `make otaniemi-elevation-coverage` validates the bounded request without
+publishing anything. To make a deliberate live refresh, copy `.env.example` to the
+Git-ignored `.env`, set `MML_API_KEY`, and run
+`make otaniemi-elevation-refresh`. The target reads the key only in its child shell,
+uses HTTP Basic authentication against the fixed endpoint, and never writes the
+credential to source metadata. Do not use the refresh target in startup or routine
+offline reproduction.
 
 Refreshes create content-addressed raw archives through adapter-controlled URLs and
 atomically advance mutable latest pointers and selection-specific bundle manifests.
@@ -288,6 +336,8 @@ edges or participate in a solver.
 - The frozen Syke material is CC BY 4.0 and requires Finnish Environment Institute
   attribution. Long-term or intensive service use requires a Syke application
   identifier.
+- The frozen MML Elevation Model 2 m material is CC BY 4.0 and requires National
+  Land Survey of Finland attribution.
 - The checked Espoo open-data layers are CC BY 4.0 and require City of Espoo
   attribution plus identification of modifications.
 
@@ -300,10 +350,11 @@ analytical step.
 ## Next boundary
 
 Before optimization, the project still needs reviewed origins, explicit safe
-destinations, mode-specific impedance, documented flood-to-availability assumptions,
-and an independent vulnerability verifier. The location workflow can preflight and
-build a bounded base-network snapshot, but it does not yet turn that snapshot into a
-resilient-access analysis or replace the Kallio graph in the planter solver. The
-most valuable next result is a vulnerability report showing which origins lose or
-retain access under each explicit scenario, with counterexample routes and
-vertical-review exceptions visible.
+destinations, mode-specific impedance, documented flood/roadworks-to-availability
+assumptions, and an independent vulnerability verifier. The location workflow can
+preflight and build a bounded base-network snapshot, but it does not yet turn that
+snapshot into a resilient-access analysis or replace the Kallio graph in the planter
+solver. The most valuable next result is a vulnerability report showing which
+origins lose or retain access under each explicit flood and roadworks scenario, with
+counterexample routes, MML-assisted vertical-review evidence, and uncertainty
+visible. Terrain height must not be converted directly into a home-made flood extent.

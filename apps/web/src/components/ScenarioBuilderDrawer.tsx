@@ -5,7 +5,7 @@ import {
   Check,
   CircleStop,
   Database,
-  KeyRound,
+  Grid3X3,
   LoaderCircle,
   MapPinned,
   RefreshCw,
@@ -47,10 +47,14 @@ const DEFAULT_CUSTOM_AREA = {
 }
 
 interface ScenarioBuilderDrawerProps {
-  onClose: () => void
+  onClose?: () => void
+  variant?: 'drawer' | 'workspace'
 }
 
-export function ScenarioBuilderDrawer({ onClose }: ScenarioBuilderDrawerProps) {
+export function ScenarioBuilderDrawer({
+  onClose,
+  variant = 'drawer',
+}: ScenarioBuilderDrawerProps) {
   const [catalog, setCatalog] = useState<BuilderCatalog>()
   const [mode, setMode] = useState<'preset' | 'custom'>('preset')
   const [customArea, setCustomArea] = useState(DEFAULT_CUSTOM_AREA)
@@ -166,26 +170,36 @@ export function ScenarioBuilderDrawer({ onClose }: ScenarioBuilderDrawerProps) {
   const buildAllowed = Boolean(preflight && (preflight.offline_build_ready || allowRefresh))
 
   return (
-    <aside className="builder-drawer" aria-labelledby="builder-title" aria-modal="true" role="dialog">
+    <aside
+      className={`builder-drawer ${variant === 'workspace' ? 'builder-drawer--workspace' : ''}`}
+      aria-labelledby="builder-title"
+      aria-modal={variant === 'drawer' ? true : undefined}
+      role={variant === 'drawer' ? 'dialog' : 'region'}
+    >
       <header className="builder-drawer__header">
         <div>
-          <span>Successor experiment</span>
-          <h2 id="builder-title">Choose the network</h2>
+          <span>{variant === 'workspace' ? 'Evidence workspace' : 'Current experiment'}</span>
+          <h2 id="builder-title">
+            {variant === 'workspace' ? 'Otaniemi network evidence' : 'Choose the network'}
+          </h2>
         </div>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={onClose}
-          aria-label="Close study-area builder"
-          disabled={jobActive}
-        >
-          <X size={17} />
-        </button>
+        {onClose && (
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Close study-area builder"
+            disabled={jobActive}
+          >
+            <X size={17} />
+          </button>
+        )}
       </header>
 
       <p className="builder-lead">
-        Prepare a reproducible base network for flood and roadworks resilience. This does not
-        replace the open Kallio modal-filter solver.
+        {variant === 'workspace'
+          ? 'Inspect the frozen Otaniemi evidence or define another bounded Finland study area. Building prepares a graph; it does not yet solve resilient access.'
+          : 'Prepare a reproducible base network for flood and roadworks resilience. This does not replace the open Kallio modal-filter solver.'}
       </p>
 
       {loading ? (
@@ -417,9 +431,17 @@ export function ScenarioBuilderDrawer({ onClose }: ScenarioBuilderDrawerProps) {
               <p className="builder-attribution">
                 Source data: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> · ODbL 1.0
                 {mode === 'preset' && (
-                  <> · adapted from <a href="https://www.syke.fi/en/environmental-data/open-web-services/web-map-services" target="_blank" rel="noreferrer">SYKE</a> and <a href="https://www.espoo.fi/en/open-data-of-the-geographic-information-unit" target="_blank" rel="noreferrer">City of Espoo</a> · CC BY 4.0</>
+                  <>
+                    {' '}· elevation adapted and normalized from the <a href="https://www.maanmittauslaitos.fi/en/maps-and-spatial-data/datasets-and-interfaces/product-descriptions/elevation-model-2-m" target="_blank" rel="noreferrer">National Land Survey of Finland Elevation Model 2 m</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a> · adapted from <a href="https://www.syke.fi/en/environmental-data/open-web-services/web-map-services" target="_blank" rel="noreferrer">SYKE</a> and <a href="https://www.espoo.fi/en/open-data-of-the-geographic-information-unit" target="_blank" rel="noreferrer">City of Espoo</a> · CC BY 4.0
+                  </>
                 )}
               </p>
+              {mode === 'preset' && (
+                <p className="builder-attribution builder-attribution--scope">
+                  Elevation is archived terrain evidence only. Source presence does not establish
+                  flooding, road closure, or passability.
+                </p>
+              )}
             </div>
           </footer>
         </>
@@ -462,28 +484,54 @@ function FloodExposureSummary({
 }
 
 function SourceRow({ source }: { source: BuilderSourceReadiness }) {
+  const isRaster = source.role === 'elevation'
+  const displayName = source.adapter_id === 'mml_elevation'
+    ? 'National Land Survey of Finland Elevation Model 2 m'
+    : source.name
+  const readiness = readinessLabel(source.readiness)
+  const visibleReadiness = isRaster ? `Raster ${readiness.toLowerCase()}` : readiness
   const icon = source.role === 'flood_hazard'
     ? <Waves size={15} />
     : source.role === 'municipal_context'
       ? <Building2 size={15} />
       : source.role === 'elevation'
-        ? <KeyRound size={15} />
+        ? <Grid3X3 size={15} />
         : source.role === 'roadworks'
           ? <TriangleAlert size={15} />
           : <Route size={15} />
   return (
-    <li className={`source-row source-row--${source.readiness}`} title={source.message}>
+    <li className={`source-row source-row--${source.readiness}`}>
       <span className="source-row__icon">{icon}</span>
       <span>
-        <strong>{source.name}</strong>
-        <small>
+        <strong>{displayName}</strong>
+        <small className="source-row__meta">
           {source.feature_count ? `${source.feature_count.toLocaleString()} features · ` : ''}
           coverage {source.spatial_coverage}
         </small>
+        {isRaster && (
+          <small className="source-row__evidence">
+            {source.message}
+            {source.acquired_at && (
+              <> <time dateTime={source.acquired_at}>Frozen {formatUtcTimestamp(source.acquired_at)}</time>.</>
+            )}
+          </small>
+        )}
       </span>
-      <b>{readinessLabel(source.readiness)}</b>
+      <b aria-label={`Readiness: ${visibleReadiness}`}>{visibleReadiness}</b>
     </li>
   )
+}
+
+function formatUtcTimestamp(value: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  const date = parsed.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+  return `${date}, ${parsed.toISOString().slice(11, 16)} UTC`
 }
 
 function BuildProgress({ job }: { job: BuilderJob }) {
@@ -523,7 +571,7 @@ function readinessLabel(readiness: BuilderSourceReadiness['readiness']): string 
   if (readiness === 'archived') return 'Archived'
   if (readiness === 'refresh_required') return 'Refresh needed'
   if (readiness === 'invalid_archive') return 'Invalid'
-  if (readiness === 'credentials_required') return 'Key needed'
+  if (readiness === 'credentials_required') return 'Credential needed'
   if (readiness === 'user_source_required') return 'User source'
   return 'Missing'
 }

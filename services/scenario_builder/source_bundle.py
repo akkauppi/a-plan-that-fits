@@ -30,6 +30,7 @@ from .adapters import (
     source_adapter_workspace,
 )
 from .espoo import EspooWfsAdapter
+from .mml import MmlElevationAdapter
 from .models import (
     CoverageAssessment,
     ScenarioRecipe,
@@ -181,12 +182,13 @@ def default_source_adapter_registry(
     refresh: bool = False,
     clock: Clock | None = None,
 ) -> SourceBundleAdapterRegistry:
-    """Register the three audited network, hazard, and municipal adapters."""
+    """Register the audited network, elevation, hazard, and municipal adapters."""
 
     adapter_clock = clock or (lambda: datetime.now(UTC))
     return SourceBundleAdapterRegistry(
         (
             OsmOverpassAdapter(refresh=refresh, clock=adapter_clock),
+            MmlElevationAdapter(refresh=refresh, clock=adapter_clock),
             SykeCoastalFloodAdapter(refresh=refresh, clock=adapter_clock),
             EspooWfsAdapter(refresh=refresh, clock=adapter_clock),
         )

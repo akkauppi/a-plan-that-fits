@@ -41,16 +41,59 @@ function preflight(offline = true) {
       core_area_km2: 2.743,
       network_context_bbox: [24.8, 60.16, 24.85, 60.2],
     },
-    sources: [{
-      adapter_id: 'osm',
-      name: 'OpenStreetMap road network',
-      role: 'base_network',
-      readiness: offline ? 'archived' : 'refresh_required',
-      available_offline: offline,
-      feature_count: offline ? 25390 : null,
-      spatial_coverage: 'unknown',
-      message: 'Completeness is not asserted.',
-    }],
+    sources: offline
+      ? [
+          {
+            adapter_id: 'osm',
+            name: 'OpenStreetMap road network',
+            role: 'base_network',
+            readiness: 'archived',
+            available_offline: true,
+            feature_count: 25390,
+            spatial_coverage: 'unknown',
+            message: 'Completeness is not asserted.',
+          },
+          {
+            adapter_id: 'mml_elevation',
+            name: 'National Land Survey elevation',
+            role: 'elevation',
+            readiness: 'archived',
+            available_offline: true,
+            feature_count: null,
+            spatial_coverage: 'full',
+            message: 'Archived terrain raster; flood and passability are not inferred.',
+          },
+          {
+            adapter_id: 'syke',
+            name: 'SYKE coastal flood zones',
+            role: 'flood_hazard',
+            readiness: 'archived',
+            available_offline: true,
+            feature_count: 4,
+            spatial_coverage: 'full',
+            message: 'Frozen coastal-flood evidence.',
+          },
+          {
+            adapter_id: 'espoo_wfs',
+            name: 'City of Espoo municipal context',
+            role: 'municipal_context',
+            readiness: 'archived',
+            available_offline: true,
+            feature_count: 18,
+            spatial_coverage: 'full',
+            message: 'Frozen municipal evidence.',
+          },
+        ]
+      : [{
+          adapter_id: 'osm',
+          name: 'OpenStreetMap road network',
+          role: 'base_network',
+          readiness: 'refresh_required',
+          available_offline: false,
+          feature_count: null,
+          spatial_coverage: 'unknown',
+          message: 'Completeness is not asserted.',
+        }],
     offline_build_ready: offline,
     build: { status: offline ? 'verified_snapshot' : 'not_built', snapshot_id: offline ? 'base-old' : null },
     semantics: {
@@ -88,6 +131,14 @@ describe('ScenarioBuilderDrawer', () => {
     expect(await screen.findByText('Source readiness')).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /Otaniemi coast/i })).toBeChecked()
     expect(screen.getByText('25,390 features · coverage unknown')).toBeInTheDocument()
+    expect(screen.getAllByText('National Land Survey of Finland Elevation Model 2 m')).toHaveLength(2)
+    expect(screen.getByText('Raster archived')).toBeInTheDocument()
+    expect(screen.getByLabelText('Readiness: Raster archived')).toBeInTheDocument()
+    expect(screen.getByText('4 archived')).toBeInTheDocument()
+    expect(screen.queryByText('Key needed')).not.toBeInTheDocument()
+    expect(screen.getByText(/Source presence does not establish flooding, road closure, or passability/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'National Land Survey of Finland Elevation Model 2 m' })).toHaveAttribute('href', expect.stringContaining('elevation-model-2-m'))
+    expect(screen.getByRole('link', { name: 'CC BY 4.0' })).toHaveAttribute('href', 'https://creativecommons.org/licenses/by/4.0/')
     expect(screen.getByRole('button', { name: /Rebuild from frozen archive/i })).toBeEnabled()
     expect(screen.getByText(/does not replace the open Kallio/i)).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)

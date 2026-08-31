@@ -8,14 +8,18 @@ test('preflights frozen Otaniemi and picks a custom location on the map', async 
   testInfo.setTimeout(420_000)
   const browserErrors = monitorBrowserErrors(page)
   await page.goto('/')
-  await page.getByRole('button', { name: 'Study area', exact: true }).click()
 
-  await expect(page.getByRole('heading', { name: 'Choose the network' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Keep the coast reachable/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Otaniemi network evidence' })).toBeVisible()
   await expect(page.getByText('Otaniemi coast, Espoo')).toBeVisible()
   await expect(page.locator('.build-summary').getByText('Verified')).toBeVisible({ timeout: 120_000 })
+  await expect(page.locator('.source-readiness').getByText('National Land Survey of Finland Elevation Model 2 m')).toBeVisible()
+  await expect(page.getByText('Raster archived')).toBeVisible()
+  await expect(page.getByText('4 archived')).toBeVisible()
   await expect(page.getByText('SYKE coastal flood zones')).toBeVisible()
   await expect(page.getByText('City of Espoo municipal context')).toBeVisible()
-  await expect(page.getByText('Key needed')).toBeVisible()
+  await expect(page.getByText('Key needed')).toHaveCount(0)
+  await expect(page.getByText(/Source presence does not establish flooding, road closure, or passability/i)).toBeVisible()
   await expect(page.getByText('User source')).toBeVisible()
   await expect(page.getByText('892 segments')).toBeVisible()
   await expect(page.getByText('1,608 segments')).toBeVisible()
@@ -43,6 +47,7 @@ test('preflights frozen Otaniemi and picks a custom location on the map', async 
 test('loads the frozen map, refines a solution, and requests an alternative', async ({ page }, testInfo) => {
   const browserErrors = monitorBrowserErrors(page)
   await page.goto('/')
+  await openBaseline(page)
   await expect(page.getByRole('heading', { name: /Close the shortcuts/i })).toBeVisible()
   await expect(page.getByText('Frozen Helsinki scenario')).toBeVisible()
   await expect(page.locator('.maplibregl-canvas')).toBeVisible()
@@ -80,6 +85,7 @@ test('locks a map candidate and distinguishes budget UNSAT from timeout', async 
   expect(candidate).toBeTruthy()
 
   await page.goto('/')
+  await openBaseline(page)
   await expect(page.locator('.maplibregl-canvas')).toBeVisible()
   await page.waitForFunction(() => Boolean(window.__FOUR_PLANTERS_MAP__?.loaded()))
   await clickMapCoordinate(page, candidate!.point)
@@ -121,6 +127,7 @@ test('shares the selected timeout and sends it to the solver', async ({ page }) 
   })
 
   await page.goto('/')
+  await openBaseline(page)
   await expect(page.locator('.maplibregl-canvas')).toBeVisible()
   await page.getByText('Access & solver settings', { exact: true }).click()
   await page.getByLabel('Solver timeout').selectOption('120')
@@ -136,6 +143,7 @@ test('shares the selected timeout and sends it to the solver', async ({ page }) 
 
 test('cancels an active solve without claiming infeasibility', async ({ page }) => {
   await page.goto('/')
+  await openBaseline(page)
   await expect(page.locator('.maplibregl-canvas')).toBeVisible()
   await page.getByRole('button', { name: /Solve with four/i }).click()
   await page.getByRole('button', { name: 'Cancel solve' }).click()
@@ -144,6 +152,11 @@ test('cancels an active solve without claiming infeasibility', async ({ page }) 
   await expect(page.getByRole('heading', { name: 'Solve cancelled' })).toBeVisible()
   await expect(page.getByLabel('Verified infeasible result')).toHaveCount(0)
 })
+
+async function openBaseline(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Kallio baseline' }).click()
+  await expect(page.getByText('Frozen Helsinki scenario')).toBeVisible()
+}
 
 async function clickMapCoordinate(page: Page, coordinate: [number, number]): Promise<void> {
   const point = await page.evaluate((lngLat) => {
