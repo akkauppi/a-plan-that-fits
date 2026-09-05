@@ -9,9 +9,10 @@ for (const file of ['z3-built.js', 'z3-built.wasm']) {
   await copyFile(new URL(`../node_modules/z3-solver/build/${file}`, import.meta.url), new URL(`z3-5.2.0/${file}`, runtime));
 }
 await copyFile(new URL('../node_modules/coi-serviceworker/coi-serviceworker.js', import.meta.url), new URL('../public/coi-serviceworker.js', import.meta.url));
+await copyFile(new URL('../LICENSE', import.meta.url), new URL('../public/LICENSE.txt', import.meta.url));
 // Preserve licences of runtime dependencies in the distributable site.
 const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'));
-const notices = ['Third-party software notices. Geographic data attribution is in data/README.md and in the tour.'];
+const notices = ['Project code: MIT; see LICENSE.txt. Third-party software notices follow. Geographic data keeps its separate licences; see https://github.com/akkauppi/a-plan-that-fits/blob/main/data/README.md and the tour.'];
 for (const [path, info] of Object.entries(lock.packages)) {
   if (!path || info.dev) continue;
   const directory = new URL(`../${path}/`, import.meta.url);

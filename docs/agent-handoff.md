@@ -1,16 +1,35 @@
-# Resilient solver tour: continuation handoff
+# Planning-constraints learning prototype: continuation handoff
 
 Read [AGENTS.md](../AGENTS.md), [model.md](model.md),
 [expanded-scenario.md](expanded-scenario.md) and [development.md](development.md)
 before changing behaviour. This repository intentionally contains one
 self-guided browser demonstration of constraint solving in geography.
 
+## Public home and distribution
+
+- Repository: [akkauppi/a-plan-that-fits](https://github.com/akkauppi/a-plan-that-fits).
+- Demo: [GitHub Pages](https://akkauppi.github.io/a-plan-that-fits/).
+- Our code and documentation: [MIT](../LICENSE). Geographic data and
+  dependencies retain their separate licences and attribution.
+- [CITATION.cff](../CITATION.cff) identifies the software. Public documentation
+  should continue to distinguish implementation evidence from an unevaluated
+  learning hypothesis.
+- Pages uses an explicit manual deployment workflow. A push runs checks, not
+  publication. See [deployment instructions](development.md#publish-an-update).
+
 ## Product story
 
-The title is **A plan that fits** and the hero is **Can this neighbourhood keep
-delivering?** Nontechnical users choose hypothetical drone-supplied parcel
-lockers and depots on a real walking map. Every population-cell representative
-point must have a directed walk of at most 500 m. The network must fit whole-cell
+The title is **A plan that fits** and the hero is **What makes a plan work?**
+The research question is whether a map-based game and solver feedback help
+people understand interacting planning constraints. This is an exploratory
+prototype: no participant study has yet demonstrated a learning benefit. Read
+[research-framing.md](research-framing.md) for claim boundaries, related work
+and a proposed evaluation. Do not add participant tracking incidentally.
+
+The tour follows **predict → check → explain**. Nontechnical users choose
+hypothetical drone-supplied parcel lockers and depots on a real walking map.
+Every population-cell representative point must have a directed walk of at most
+500 m. The network must fit whole-cell
 parcel demand, locker and shared depot capacities, a 2 km return-flight range,
 and a complete supply reassignment after any one selected depot is unavailable.
 
@@ -20,11 +39,16 @@ each locker has two selected depots in range. They are necessary conditions,
 not a feasibility claim. Z3 checks hidden collection, normal supply and four
 outage assignments. “Let Z3 find a plan” remains available.
 
-The core teaching boundary is now meaningful: four depots are feasible, while
-three are UNSAT. Across all 20 three-depot choices, robust lockers cover at most
-27 of 33 cells. In a local Node profile, Z3 proved this much faster than the
-independent enumeration, which inspected millions of sets; browser timings are
-illustrative and never a universal benchmark claim.
+The teaching boundary is four depots feasible, three UNSAT. Across all 20
+three-depot choices, robust lockers cover at most 27 of 33 cells. An expandable
+explanation shows this simple geographic proof. The boundary does not require
+Z3 to establish impossibility, and a depot-first baseline could reject it before
+enumerating locker sets. Large raw counts are not evidence of inherent hardness.
+
+The optional two-method cross-check is initially collapsed and starts with the
+feasible question. It compares answers, not speed. Timings and branch counts
+remain in separate, initially collapsed diagnostic details. Agreement supports
+implementation consistency, not the real-world validity of the model.
 
 ## Implemented contracts
 
@@ -46,6 +70,9 @@ illustrative and never a universal benchmark claim.
 - A tiny oracle distinguishes two depots being in range from a survivor having
   enough capacity. It covers SAT, range-UNSAT, capacity-UNSAT and corrupted
   contingency plans.
+- Conclusion-copy tests ensure only matching feasible/UNSAT results establish
+  agreement. Timeouts, cancellations and errors remain inconclusive even when
+  both implementations return the same status.
 - `npm run data:audit-complexity` reports 29,418,840 exact site choices, choice
   degrees, deterministic feasible branch profiles and the complete 20-choice
   local proof at the three-depot boundary. It does not allocate every exact
@@ -78,7 +105,29 @@ npm run test:e2e
 built site and inspect desktop/tablet screenshots as well as exit status. The
 30-second solver limit yields “no conclusion” on expiry, never UNSAT.
 
-Verification on September 5, 2026: `npm run check` passed strict types,
+Learning/science refocus verification on September 5, 2026: `npm run check`
+passed strict types, byte-identical scenario regeneration, all seven serialized
+Node test files and the production build. `npm run data:audit-complexity`
+retained the pinned counts and branch profiles. The final `npm run test:e2e`
+passed all four Chromium tests, including both feasibility cross-check questions
+on desktop and tablet. Opening, answer-only comparison, reflection and methods/
+research screenshots were visually reviewed at those viewport sizes. Known
+classic-script and chunk-size build warnings remain as documented.
+
+No solver constraints, frozen geography or candidate choices changed in this
+refocus. No participant study, recruitment or data collection was performed;
+automated tests do not establish learning effectiveness.
+
+Publication-readiness verification on September 5, 2026: `npm run check` and
+all four desktop/tablet Chromium tests passed again after adding the public
+repository metadata, citation file and MIT licence. The browser tests also
+check the canonical share URL and served `LICENSE.txt`; the built licence is
+byte-identical to the source licence. Opening desktop/tablet screenshots were
+reviewed. These local checks are not a substitute for testing the deployed
+Pages site after publication.
+
+Previous resilience checkpoint verification on September 5, 2026:
+`npm run check` passed strict types,
 byte-identical scenario regeneration, all six serialized Node test files and the
 production build. `npm run test:e2e` passed four Chromium tests: full desktop
 and tablet journeys plus both unsupported-browser/dialog cases. Desktop and
@@ -95,8 +144,13 @@ verification. Do not hand-edit generated scenario/runtime files. Do not claim
 real locker suitability, approved flight routes, household accessibility,
 optimality, simultaneous-failure resilience or general solver superiority.
 
-Useful next work after the migration is verified is a short colleague
-walkthrough focused on whether users can explain: what geography supplies, what
-Z3 chooses, why two in-range depots are insufficient by themselves, and what
-SAT/UNSAT do and do not establish. Prefer one observed comprehension fix over
-adding another feature or demo.
+Useful next work is a short colleague walkthrough focused on whether users can
+explain: what geography supplies, what people assume, what Z3 chooses, why two
+in-range depots are insufficient by themselves, and what feasible/UNSAT results
+do and do not establish. Prefer one observed comprehension fix over adding
+another feature or demo. A formal comparative study needs a defined protocol
+and participant-data handling before recruitment or collection.
+
+The owner has explicitly deferred generation from unprepared locations. Do not
+add a location picker, live geographic import or a new scenario as a continuation
+of this learning/science refocus.

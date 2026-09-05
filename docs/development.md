@@ -57,7 +57,8 @@ public/data/scenario.json
 - `src/solver/client.ts`: lifecycle, monotonically increasing request IDs, cancellation, crash handling and watchdogs.
 - `src/exhaustive/model.ts`: transparent brute-force enumeration of the same site, collection and supply decisions, with sound constraint pruning and branch counts.
 - `src/exhaustive/worker.ts`: separate browser worker used by the sequential comparison.
-- `src/ui/App.tsx`: five-stop narrative, request scope and result invalidation.
+- `src/ui/App.tsx`: predict/check/explain narrative, request scope, result invalidation and optional implementation cross-check.
+- `src/ui/comparison.ts`: conclusion wording that distinguishes genuine agreement from inconclusive results; covered by pure Node tests.
 - `src/ui/MapView.tsx`: local vector geography and one inspectable collection/supply journey.
 - `src/ui/CandidateExplanation.tsx`: visible shortlist provenance and its distinction from the final solver-selected plan.
 - `tools/candidate-selection.mjs`: repeatable walking-only shortlist procedure, checked against the frozen candidate IDs in tests.
@@ -82,21 +83,50 @@ This is not an offline cache: the service worker forwards requests and adds head
 
 ## GitHub Pages
 
+Repository: [akkauppi/a-plan-that-fits](https://github.com/akkauppi/a-plan-that-fits).
+Demo URL: [akkauppi.github.io/a-plan-that-fits](https://akkauppi.github.io/a-plan-that-fits/).
+
 The Vite base is relative (`./`). Keep asset, worker, WASM and service-worker URLs relative to the project path. Do not “fix” paths to `/runtime/...` or `/data/...`; that breaks repository Pages sites.
 
 The [manual publication workflow](../.github/workflows/pages.yml) builds, checks, browser-tests, uploads only `dist/`, and deploys via GitHub Pages. It runs **only** on `workflow_dispatch`, not on a push. The independent [check workflow](../.github/workflows/check.yml) does not publish.
 
-When the repository owner is ready to publish:
+### Publish an update
 
-1. Push the reviewed slice to their repository, including its lockfile and frozen inputs. Preserve/push the archive tag if they want the named historical checkpoint remotely.
-2. In repository Settings → Pages, choose GitHub Actions as the source.
-3. Run “Publish static tour” manually and approve any configured `github-pages` environment gate.
-4. Test the resulting HTTPS URL in a fresh browser profile. Confirm local initialization, a verified joint network, a genuine impossible case, and correct subpath asset loading.
+After reviewing and pushing a tested commit to `main`, a maintainer can run
+**Actions → Publish static tour → Run workflow**, or use:
 
-These follow [GitHub's custom Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages). A real remote deployment is deliberately not performed as part of this slice. Hosting requires owner authority and repository configuration.
+```sh
+gh workflow run pages.yml --repo akkauppi/a-plan-that-fits --ref main
+gh run list --repo akkauppi/a-plan-that-fits --workflow pages.yml --limit 3
+```
+
+Check the run's final status and deployed commit. Then open the HTTPS URL in a
+fresh browser profile: confirm browser isolation, a verified feasible plan,
+the three-depot impossibility and project-scoped asset loading. Successful
+deployment alone does not verify WebAssembly startup in a browser. Do not
+publish as an incidental part of a documentation or code change without the
+maintainer's request.
+
+For a new fork, enable **Settings → Pages → Source: GitHub Actions** before
+dispatching its workflow, and update the repository/demo links in metadata.
+No custom domain is required. The build has read access to Pages configuration;
+only the deployment job receives `pages: write` and `id-token: write`.
+The workflow follows [GitHub's custom Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+
+### Public distribution
+
+`tools/prepare-runtime.mjs` includes the project's MIT licence as `LICENSE.txt`
+in the built site, alongside generated third-party software notices. Geographic
+data keeps its separate ODbL/CC BY terms. `CITATION.cff` provides software
+citation metadata; no DOI, publication or completed learning study is claimed.
+
+The archive tag preserves earlier experiments without restoring them to the
+active app. Normal builds use committed frozen inputs and do not need the
+archive history. Only the explicit recovery command `npm run data:import`
+requires that history.
 
 ## Tests and interpretation
 
 The Node suite includes exhaustive enumeration of 32 tiny budget/capacity/range combinations plus exact-selection cases, independently compared with real Z3. A separate tiny outage oracle proves that redundant range alone is insufficient, compares both engines on feasible and impossible capacity-aware contingencies, and mutates returned outage plans against the independent verifier. The geographic fixture suite checks the pinned teaching cases and every offered repair. Mutation tests reject omitted eligible walks, route corruption, missing/duplicated demand, unreachable supply and shared-capacity violations. Client tests use a fake worker only for timing and stale-message control; the model and browser acceptance use real Z3.
 
-The browser suite checks a cold service-worker bootstrap, an empty game start, map/keyboard site toggles, exact flight-table-based backup warnings, a manual exact resilient win, the solver escape hatch, verified outage plans, the three-depot impossibility, sequential Z3/brute-force comparisons, rule-change experiments, local-only asset requests, keyboard dialog behaviour and an unsupported-browser explanation. It captures the major story states at desktop and tablet sizes. It is not yet a full accessibility audit, long-running stress test or multi-engine certification.
+The browser suite checks a cold service-worker bootstrap, an empty game start, map/keyboard site toggles, exact flight-table-based backup warnings, a manual exact resilient win, the solver escape hatch, verified outage plans, the three-depot impossibility, sequential Z3/brute-force cross-checks for both questions, rule-change experiments, local-only asset requests, keyboard dialog behaviour and an unsupported-browser explanation. It also protects the unevaluated-study label, reflection prompts, optional comparison disclosure, hidden-by-default timing/branch counts and research links. It captures the major story states at desktop and tablet sizes. These checks establish interface behaviour, not learning effectiveness. They are not a full accessibility audit, long-running stress test or multi-engine certification.

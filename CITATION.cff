@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+type: software
+title: "A plan that fits: exploring planning constraints with a solver"
+message: >-
+  If you discuss or use this prototype in research or teaching, please cite
+  the software and record the Git commit and geographic snapshot used.
+  This citation describes software, not a published participant study.
+authors:
+  - name: "A plan that fits contributors"
+repository-code: "https://github.com/akkauppi/a-plan-that-fits"
+url: "https://akkauppi.github.io/a-plan-that-fits/"
+license: MIT
+abstract: >-
+  An exploratory browser-based planning game for understanding interacting
+  spatial constraints and a solver's potential role in examining them.
+  Users choose hypothetical drone-supplied parcel lockers on real walking
+  geography, inspect Z3 feedback, and explore capacity and depot-outage rules.
+  Learning benefits have not been evaluated in a participant study. Geographic
+  data and third-party software retain their separate licences.
+keywords:
+  - constraint solving
+  - spatial planning
+  - learning
+  - Z3
+  - satisfiability modulo theories
+  - facility location
+  - geographic information systems
+  - WebAssembly

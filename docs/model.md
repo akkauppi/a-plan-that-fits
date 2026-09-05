@@ -1,6 +1,10 @@
 # Model contract
 
-This document defines the teaching model implemented in [model.ts](../src/solver/model.ts). Change it only together with the tests and the tour's explanation.
+This document defines the finite site-selection and assignment model
+implemented in [model.ts](../src/solver/model.ts). It is the contract for
+interpreting a result and reviewing an implementation change. For the learning
+question and proposed evaluation, see [research framing](research-framing.md).
+Change this contract only together with the tests and the tour's explanation.
 
 ## Facts, decisions and rules
 
@@ -47,8 +51,8 @@ Invalid IDs, duplicate IDs, non-integer limits or out-of-range input are **error
 
 ### Single-depot-outage contract
 
-The solver layer supports a checked `depotOutageTolerance: 1` request, although
-the current browser story and generated scenario do not enable it yet. The
+The current browser story and generated scenario enable the checked
+`depotOutageTolerance: 1` request by default. The
 ordinary supply assignment still defines which selected depots are open and
 used. For every selected depot, the returned plan then includes a separate
 contingency in which that depot is unavailable. Every open locker must choose
@@ -68,7 +72,7 @@ Prepared inspection lockers: **A, C, E, F, G, J, L, N**. Their built assignments
 
 | Case | What remains fixed | Expected result |
 | --- | --- | --- |
-| Joint resilient baseline | Default rules; no exact selections | Feasible, 10 lockers and 4 depots |
+| Joint resilient baseline | Default rules; no exact selections | Feasible within the 10-locker/4-depot budgets |
 | Exact game witness | A/B/C/D/E/F/G/J/L/N and West/North/East/Central-West | Feasible through every depot outage |
 | Resilience boundary | All sites free; at most 3 depots; one may fail | UNSAT |
 | Remove outage rule | All sites free; at most 3 depots; normal operation only | Feasible |
@@ -90,7 +94,9 @@ The pre-solve validator recomputes shortest paths on the **full frozen walking g
 
 [`solveScenario`](../src/solver/model.ts) expresses the decisions as Boolean and integer constraints for Z3. [`solveByEnumeration`](../src/exhaustive/model.ts) is a brute-force implementation that independently enumerates locker sets, depot sets, whole-cell assignments, normal one-depot-per-locker supplies and—when requested—each outage reassignment. It prunes only after a stated budget, eligibility, use or capacity rule makes every completion of that branch impossible. It never calls Z3.
 
-The browser comparison gives both engines the same validated scenario, request and 30-second limit. They run sequentially in separate warm workers, and each feasible plan passes through the same independent verifier. Displayed time includes validation, search/model construction and verification, but excludes download and worker initialization. Branch counts describe only the exhaustive run. One run on this structured fixture is explanatory evidence, not a general performance benchmark; different search order, browser, hardware or model can reverse the result.
+The optional browser cross-check gives both engines the same validated scenario, request and 30-second limit. They run sequentially in separate warm workers, and each feasible plan passes through the same independent verifier. The primary table compares feasibility conclusions. Only matching feasible/UNSAT results establish agreement; two timeouts, cancellations or errors remain inconclusive. Agreement supports implementation consistency, not the realism of assumptions or the completeness of the original data sources.
+
+Timing and branch counts appear only in expandable diagnostic details. Displayed time includes validation, search/model construction and verification, but excludes download and worker initialization. Branch counts describe only the exhaustive run. One run on this structured fixture is not a general performance benchmark; different search order, browser, hardware or model can reverse the result. The three-depot impossibility already follows from checking local coverage for 20 depot triples. A baseline that performs that check first could avoid the larger locker-first enumeration.
 
 ## Deliberate limits
 

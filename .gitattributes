@@ -1,0 +1,4 @@
+# Keep the public code view focused on authored code and documentation.
+public/data/scenario.json linguist-generated=true
+data/inputs/** linguist-vendored=true
+data/sources/** linguist-vendored=true

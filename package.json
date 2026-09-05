@@ -1,6 +1,15 @@
 {
   "name": "a-plan-that-fits",
   "version": "0.1.0",
+  "description": "An exploratory planning game for understanding spatial constraints and solver feedback, using Z3 in the browser.",
+  "license": "MIT",
+  "homepage": "https://akkauppi.github.io/a-plan-that-fits/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/akkauppi/a-plan-that-fits.git"
+  },
+  "bugs": { "url": "https://github.com/akkauppi/a-plan-that-fits/issues" },
+  "keywords": ["constraint-solving", "z3", "geospatial", "urban-planning", "learning", "webassembly"],
   "private": true,
   "type": "module",
   "engines": { "node": ">=22.18.0" },

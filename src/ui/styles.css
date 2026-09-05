@@ -75,6 +75,11 @@ h3 { font-size: 18px; margin: 22px 0 10px; }
 .rule-card { display: grid; grid-template-columns: 1fr 1fr; background: #f3f6ef; border: 1px solid #e0e8da; border-radius: 9px; padding: 15px 18px; gap: 16px 10px; margin: 22px 0; }
 .rule-card div { display: flex; flex-direction: column; }.rule-card strong { font-size: 23px; color: #27694f; letter-spacing: -0.04em; }.rule-card span { font-size: 10px; color: #667b69; }
 .data-note { font-size: 12px; color: #64786b; line-height: 1.6; }
+.study-note { font-size: 12px; color: #536c60; padding: 11px 13px; border: 1px solid #dce5d9; border-radius: 6px; background: #f8faf5; }
+.reflection-prompt { padding: 11px 13px; margin: 15px 0; background: #f5f2e9; border-radius: 6px; color: #635f46; font-size: 12px; }
+.reflection { margin-top: 24px; border-top: 1px solid #e2e9dc; padding-top: 12px; }
+.reflection h2 { font-size: 18px; }.reflection ul { padding-left: 19px; }.reflection li { margin-bottom: 9px; }
+.geographic-explanation { margin-top: 18px; border-top: 1px solid #e2e9dc; }
 .primary { width: 100%; background: #256e54; border-color: #256e54; color: white; display: flex; align-items: center; justify-content: center; gap: 12px; margin: 21px 0 12px; padding: 13px 15px; font-size: 14px; }
 .primary:hover:not(:disabled) { background: #18593f; color: white; }.primary:disabled { opacity: 0.5; }
 .quiet { font-size: 11px; color: #77867a; line-height: 1.6; }
@@ -90,7 +95,6 @@ fieldset { padding: 0; margin: 20px 0; border: 0; }
 .locker-picker legend { grid-column: 1 / -1; }
 .locker-picker button { min-width: 0; padding: 7px 4px; color: #316451; }
 .locker-picker button[aria-pressed="true"] { color: white; background: #24735c; border-color: #24735c; }
-.game-scale { padding: 11px 13px; margin: 15px 0; background: #f5f2e9; border-radius: 6px; color: #6b684e; font-size: 11px; }
 .game-checks { display: grid; gap: 6px; margin-top: 17px; }
 .game-checks p { display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 6px; margin: 0; padding: 7px 9px; border-radius: 5px; font-size: 11px; }
 .game-checks p span { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; }
@@ -99,10 +103,10 @@ fieldset { padding: 0; margin: 20px 0; border: 0; }
 .game-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .game-actions button { font-size: 11px; padding: 9px; }
 .solver-comparison-intro { margin: 24px 0 12px; padding-top: 18px; border-top: 1px solid #dfe7dc; }
-.solver-comparison-intro h2 { font-size: 18px; margin-top: 0; }
+.solver-comparison-intro > summary { font-size: 13px; }
 .solver-comparison-intro p { font-size: 12px; }
-.solver-comparison-intro label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 9px; color: #536c60; font-size: 11px; font-weight: 700; }
-.solver-comparison-intro select { min-width: 190px; padding: 7px 9px; color: #285b4c; background: white; border: 1px solid #c9d6ca; border-radius: 6px; }
+.solver-comparison-intro label { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin: 12px 0 9px; color: #536c60; font-size: 11px; font-weight: 700; }
+.solver-comparison-intro select { width: 100%; min-width: 0; padding: 7px 9px; color: #285b4c; background: white; border: 1px solid #c9d6ca; border-radius: 6px; }
 .solver-comparison-intro > button { width: 100%; color: #275f50; background: #f2f7f1; border-color: #b9cec0; }
 .solver-comparison-intro .quiet { margin: 8px 0 0; font-size: 10px; }
 .solver-comparison { margin: 13px 0 20px; padding: 15px; border: 1px solid #d8e2d6; border-radius: 8px; background: #fbfcf8; font-size: 11px; }

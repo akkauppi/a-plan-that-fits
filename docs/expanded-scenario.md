@@ -12,6 +12,12 @@ still small enough to invite trial and error. The proposed scene has 24 locker
 candidates, six depot candidates, a ten-locker budget and a four-depot budget:
 29,418,840 exact site selections before parcel assignments or supply choices.
 
+This is a record of the expansion's motivation, not evidence of computational
+hardness. The subsequent audit finds the default feasible answer after 240
+locker sets, and the three-depot impossibility follows from 20 local coverage
+checks. The current tour focuses on understanding these constraints; timing
+and raw search counts are optional diagnostics, not its research contribution.
+
 The added rule gives the complexity a visible planning purpose:
 
 > The network must keep working when any one selected depot is unavailable.

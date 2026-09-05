@@ -1,4 +1,4 @@
-name: Check demonstrator
+name: Check learning prototype
 on:
   push:
   pull_request:

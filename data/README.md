@@ -74,4 +74,10 @@ No candidate location has been checked for ownership, usable space, safe landing
 
 The source manifest records endpoints, queries, timestamps and hashes. Reused inputs are public aggregate geographic data, not person-level data. Retired flood, elevation, address, facility and unrelated demonstration datasets are not needed by this slice and remain in Git history.
 
-Software dependency notices are generated into `public/third-party-notices.txt` during the runtime build and shipped with the static site. They are separate from geographic data terms; no new licence for the repository's own code is imposed by this refocus.
+The project's own code and documentation are licensed under [MIT](../LICENSE).
+That licence does not replace the ODbL and CC BY terms of the geographic data,
+including the data in the generated browser snapshot. Third-party software
+retains its own licences. Dependency notices are generated into
+`public/third-party-notices.txt` during the runtime build and shipped with the
+static site alongside `LICENSE.txt` for the project code. Archived datasets
+retain the attributions and terms recorded with them in Git history.

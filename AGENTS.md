@@ -1,6 +1,12 @@
 # Instructions for agents continuing this repository
 
-This is **A plan that fits**: an educational, self-guided browser introduction to constraint solving in geography, using Z3. The opening headline is “Can this neighbourhood keep delivering?”. Explain the solver concept before assuming the audience knows Z3. It is not a logistics product, generic geospatial workbench or collection of unrelated examples.
+This is **A plan that fits**: an exploratory, self-guided learning prototype about planning constraints and a solver's potential role in understanding them. The opening headline is “What makes a plan work?”. Explain the solver concept before assuming the audience knows Z3. The learning sequence is predict, check and explain. It is not a logistics product, generic geospatial workbench or collection of unrelated examples.
+
+Public home: [akkauppi/a-plan-that-fits](https://github.com/akkauppi/a-plan-that-fits).
+Demo: [GitHub Pages](https://akkauppi.github.io/a-plan-that-fits/). Code and
+documentation are MIT; data and dependencies keep their separate licences.
+Pages publication remains an explicit maintainer action, not an incidental
+consequence of editing or committing.
 
 Read [README.md](README.md), [docs/agent-handoff.md](docs/agent-handoff.md) and [docs/model.md](docs/model.md) before changing behaviour. Read [data/README.md](data/README.md) before changing geographic processing, and [docs/development.md](docs/development.md) before changing the worker or hosting.
 
@@ -17,8 +23,9 @@ search and the verifier all check capacity-feasible contingency assignments.
 - Omitted `fixedLockerIds`/`fixedDepotIds` means free choice. An array means **exactly** that set; `[]` means zero. Do not change this to “these plus any others”. Display the scope of every result.
 - Validate the complete geographic eligibility matrix before solving. An omitted allowed pair can create a false UNSAT claim. Verify a feasible result independently before displaying it.
 - SAT is feasible, not optimal. UNSAT concerns only this finite candidate set and these rules. Timeouts, cancellations, worker errors, validation failures and stale replies are not UNSAT. Unsat cores are conflicting rule groups, not necessarily minimal explanations or suggested repairs.
+- State the research status honestly: learning benefits have not been evaluated in a participant study. Do not imply demonstrated educational effectiveness, algorithmic novelty, institutional endorsement or real-world validity. See [research framing](docs/research-framing.md). Keep the solver comparison optional and initially collapsed, with timing/branch counts inside separate diagnostic details. Agreement requires two matching SAT/UNSAT conclusions, never two timeouts or errors.
 - Keep browser-local JavaScript/TypeScript + Z3 WebAssembly. No Python/backend fallback, API keys, CDN runtime, external tiles or analytics. Serve from the project's own subpath. Do not bundle Emscripten's `z3-built.js` into the high-level worker bundle.
-- Do not edit `public/data/scenario.json`, `public/runtime/`, `public/coi-serviceworker.js`, `public/third-party-notices.txt` or `dist/` manually. Use the documented builders. Do not refresh frozen sources or change candidates to make a test pass.
+- Do not edit `public/data/scenario.json`, `public/runtime/`, `public/coi-serviceworker.js`, `public/third-party-notices.txt`, `public/LICENSE.txt` or `dist/` manually. Use the documented builders. Do not refresh frozen sources or change candidates to make a test pass.
 - Preserve source attribution, raw source hashes and the difference between real geography and invented planning rules. Do not add claims about individual homes from aggregate cell points.
 - The planning game must remain winnable: exactly 10 lockers and 4 depots have a tested capacity-feasible selection that survives each single-depot outage. Live game checks show necessary geographic conditions only; they must not claim full feasibility before Z3 and the independent verifier run. Keep an immediate “Let Z3 find a plan” escape hatch.
 - In the game, map locker circles and depot labels are controls. A locker’s backup-reach warning must count selected eligible depots from `scenario.flights` and the active return-flight limit. Do not replace this with a geometric map radius: flight eligibility uses the frozen exact return distances.
