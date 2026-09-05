@@ -1,0 +1,21 @@
+{
+  "id": "otaniemi-drone-lockers-v1",
+  "walkingLimitMm": 500000,
+  "center": [24.8201, 60.1804],
+  "defaults": { "maxLockers": 8, "maxDepots": 2, "lockerCapacity": 200, "depotCapacity": 600, "flightLimitMm": 2000000 },
+  "starterLockerIds": ["A", "C", "D", "E", "G", "H", "I", "M"],
+  "lockers": [
+    ["A", "osm-node-791465666"], ["B", "osm-node-8516302775"],
+    ["C", "osm-node-1458131835"], ["D", "osm-node-355620644"],
+    ["E", "osm-node-1428976443"], ["F", "osm-node-25032009"],
+    ["G", "osm-node-11804352980"], ["H", "osm-node-5407113361"],
+    ["I", "osm-node-248415064"], ["J", "osm-node-30470035"],
+    ["K", "osm-node-11162481707"], ["L", "osm-node-1458131988"],
+    ["M", "osm-node-1768997358"], ["N", "osm-node-10745473407"],
+    ["O", "osm-node-4391982783"]
+  ],
+  "depots": [
+    ["West", "osm-node-4618550906"], ["North", "osm-node-4262444996"],
+    ["East", "osm-node-231264037"], ["South", "osm-node-1006010390"]
+  ]
+}

@@ -19,5 +19,8 @@ test-results/
 # metadata is kept here until a normal checkout can use .git again.
 /.git-local/
 
-# Browser captures generated during local review; curated images live in docs/screenshots.
+# Generated browser runtime and local captures. Recreated from the lockfile.
+/public/runtime/
+/public/coi-serviceworker.js
+/public/third-party-notices.txt
 /tmp/

@@ -1,0 +1,42 @@
+{
+  "name": "a-plan-that-fits",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "predev": "node tools/prepare-runtime.mjs",
+    "dev": "vite --host 127.0.0.1",
+    "prebuild": "node tools/prepare-runtime.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "data:import": "node tools/extract-inputs.mjs",
+    "data:build": "node tools/build-data.mjs",
+    "data:validate": "node tools/build-data.mjs --check",
+    "data:audit-candidates": "node tools/audit-candidates.mjs",
+    "data:audit-complexity": "node tools/complexity-audit.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm run data:validate && npm test && npm run build"
+  },
+  "dependencies": {
+    "coi-serviceworker": "0.1.7",
+    "lucide-react": "0.468.0",
+    "maplibre-gl": "5.24.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "z3-solver": "5.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/geojson": "^7946.0.15",
+    "@types/react": "^19.0.3",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "4.7.0",
+    "esbuild": "0.25.12",
+    "proj4": "^2.20.0",
+    "typescript": "5.7.3",
+    "vite": "6.4.3"
+  }
+}
