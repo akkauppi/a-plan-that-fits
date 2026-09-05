@@ -21,7 +21,7 @@ export async function solveScenario(api: Z3, scenario: Scenario, request: SolveR
   catch (error) { return { status: 'error', message: String(error), elapsedMs: elapsedMs() } }
 
   const ctx = new api.Context('parcel')
-  const { Bool, Int, If, Sum, And, Or } = ctx
+  const { Bool, Int, If, Sum, And, Or, Implies } = ctx
   const solver = new ctx.Solver()
   solver.set('timeout', request.timeoutMs)
   hooks.onInterruptReady?.(() => ctx.interrupt())
@@ -33,7 +33,13 @@ export async function solveScenario(api: Z3, scenario: Scenario, request: SolveR
   const openLockers = scenario.lockers.map((_, i) => Bool.const(`locker_${i}`))
   const openDepots = scenario.depots.map((_, i) => Bool.const(`depot_${i}`))
   const walks = scenario.walking.map((pair, i) => ({ ...pair, decision: Bool.const(`collect_${i}`) }))
-  const flights = scenario.flights.filter(pair => pair.returnDistanceMm <= request.flightLimitMm).map((pair, i) => ({ ...pair, decision: Bool.const(`supply_${i}`) }))
+  const eligibleFlightPairs = scenario.flights.filter(pair => pair.returnDistanceMm <= request.flightLimitMm)
+  const flights = eligibleFlightPairs.map((pair, i) => ({ ...pair, decision: Bool.const(`supply_${i}`) }))
+  const outageCases = (request.depotOutageTolerance ?? 0) === 1 ? scenario.depots.map((unavailableDepot, failureIndex) => ({
+    unavailableDepot,
+    active: openDepots[failureIndex],
+    flights: eligibleFlightPairs.filter(pair => pair.depotId !== unavailableDepot.id).map((pair, i) => ({ ...pair, decision: Bool.const(`outage_${failureIndex}_supply_${i}`) })),
+  })) : []
   const cellParcels = new Map(scenario.cells.map(c => [c.id, c.parcels]))
   const loads = scenario.lockers.map(locker => sum(walks.filter(w => w.lockerId === locker.id).map(w => If(w.decision, Int.val(cellParcels.get(w.cellId)!), Int.val(0)))))
   try {
@@ -49,6 +55,13 @@ export async function solveScenario(api: Z3, scenario: Scenario, request: SolveR
     ])
     track('depot_budget', `Open at most ${request.maxDepots} depots.`, [sum(openDepots.map(v => If(v, Int.val(1), Int.val(0)))).le(request.maxDepots)])
     track('depot_capacity', `Each depot supplies at most ${request.depotCapacity} parcels per day across all its lockers.`, scenario.depots.map(depot => sum(flights.filter(f => f.depotId === depot.id).map(f => If(f.decision, loads[scenario.lockers.findIndex(l => l.id === f.lockerId)], Int.val(0)))).le(request.depotCapacity)))
+    if (outageCases.length) {
+      track('depot_outage_supply', 'Every open locker can be reassigned to an open in-range depot after any one open depot is unavailable.', outageCases.flatMap(outage => [
+        ...scenario.lockers.map((locker, i) => sum(outage.flights.filter(f => f.lockerId === locker.id).map(f => If(f.decision, Int.val(1), Int.val(0)))).eq(If(And(outage.active, openLockers[i]), Int.val(1), Int.val(0)))),
+        ...outage.flights.map(flight => Implies(flight.decision, openDepots[scenario.depots.findIndex(depot => depot.id === flight.depotId)])),
+      ]))
+      track('depot_outage_capacity', `After any one open depot is unavailable, each remaining depot supplies at most ${request.depotCapacity} parcels per day.`, outageCases.flatMap(outage => scenario.depots.map(depot => sum(outage.flights.filter(f => f.depotId === depot.id).map(f => If(f.decision, loads[scenario.lockers.findIndex(l => l.id === f.lockerId)], Int.val(0)))).le(request.depotCapacity))))
+    }
     if (request.fixedLockerIds !== undefined) track('fixed_lockers', `Keep exactly these lockers: ${request.fixedLockerIds.join(', ') || 'none'}.`, scenario.lockers.map((l, i) => openLockers[i].eq(Bool.val(request.fixedLockerIds!.includes(l.id)))))
     if (request.fixedDepotIds !== undefined) track('fixed_depots', `Keep exactly these depots: ${request.fixedDepotIds.join(', ') || 'none'}.`, scenario.depots.map((d, i) => openDepots[i].eq(Bool.val(request.fixedDepotIds!.includes(d.id)))))
     if (hooks.isCancelled?.()) return cancelled()
@@ -71,6 +84,10 @@ export async function solveScenario(api: Z3, scenario: Scenario, request: SolveR
         depotIds: scenario.depots.filter((_, i) => selected(openDepots[i])).map(d => d.id),
         assignments: walks.filter(w => selected(w.decision)).map(({ cellId, lockerId }) => ({ cellId, lockerId })),
         supplies: flights.filter(f => selected(f.decision)).map(({ lockerId, depotId }) => ({ lockerId, depotId })),
+        outagePlans: outageCases.filter(outage => selected(outage.active)).map(outage => ({
+          unavailableDepotId: outage.unavailableDepot.id,
+          supplies: outage.flights.filter(f => selected(f.decision)).map(({ lockerId, depotId }) => ({ lockerId, depotId })),
+        })),
       }
       hooks.onPhase?.('verifying')
       const verification = verifyPlan(scenario, request, plan)

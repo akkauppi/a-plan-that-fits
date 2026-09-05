@@ -31,6 +31,8 @@ export function validateRequest(scenario: Scenario, request: SolveRequest) {
   for (const [name, max] of [['maxLockers', scenario.lockers.length], ['maxDepots', scenario.depots.length], ['lockerCapacity', 10000], ['depotCapacity', 10000], ['flightLimitMm', 10000000], ['timeoutMs', 30000]] as const) {
     check(Number.isSafeInteger(request[name]) && request[name] >= (name === 'timeoutMs' ? 1 : 0) && request[name] <= max, `Invalid ${name}`)
   }
+  const outageTolerance = request.depotOutageTolerance === undefined ? 0 : request.depotOutageTolerance
+  check(Number.isSafeInteger(outageTolerance) && outageTolerance >= 0 && outageTolerance <= 1, 'Invalid depotOutageTolerance')
   for (const [selection, candidates] of [[request.fixedLockerIds, scenario.lockers], [request.fixedDepotIds, scenario.depots]] as const) {
     if (selection === undefined) continue
     check(Array.isArray(selection), 'Selection must be an array, or omitted')

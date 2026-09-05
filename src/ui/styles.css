@@ -110,6 +110,7 @@ fieldset { padding: 0; margin: 20px 0; border: 0; }
 .solver-comparison th:last-child, .solver-comparison td:last-child { text-align: right; }
 .solver-comparison p { margin: 11px 0 0; }
 .comparison-agrees { color: #226b4e; font-weight: 700; }
+.comparison-inconclusive { color: #805f27; font-weight: 700; }
 .comparison-disagrees { color: #a04434; font-weight: 700; }
 .search-receipt { color: #62766b; line-height: 1.55; }
 .solver-comparison details { margin-top: 9px; border-top: 1px solid #e1e7df; }

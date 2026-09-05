@@ -16,7 +16,8 @@
     "data:validate": "node tools/build-data.mjs --check",
     "data:audit-candidates": "node tools/audit-candidates.mjs",
     "data:audit-complexity": "node tools/complexity-audit.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "data:explore-expansion": "node tools/expanded-scenario-proposal.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:e2e": "playwright test",
     "check": "npm run typecheck && npm run data:validate && npm test && npm run build"
   },

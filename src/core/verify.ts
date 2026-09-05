@@ -6,7 +6,7 @@ import type { Scenario, SolveRequest, NetworkPlan, Verification } from './types.
 // Scenario completeness is separately checked before a solver may claim UNSAT.
 export function verifyPlan(scenario: Scenario, request: SolveRequest, plan: NetworkPlan): Verification {
   const errors: string[] = []
-  const result: Verification = { valid: false, errors, parcelTotal: 0, lockerLoads: {}, depotLoads: {}, worstWalkMm: 0, longestFlightMm: 0, routesChecked: 0 }
+  const result: Verification = { valid: false, errors, parcelTotal: 0, lockerLoads: {}, depotLoads: {}, outageDepotLoads: {}, worstWalkMm: 0, longestFlightMm: 0, routesChecked: 0 }
   try {
     validateRequest(scenario, request)
     const graph = graphIndex(scenario.network)
@@ -38,23 +38,40 @@ export function verifyPlan(scenario: Scenario, request: SolveRequest, plan: Netw
       result.lockerLoads[assignment.lockerId] += cell.parcels
     }
     if (assigned.size !== cells.size || result.parcelTotal !== scenario.cells.reduce((sum, c) => sum + c.parcels, 0)) errors.push('Not all demand is assigned exactly once')
-    const supplied = new Set<string>()
-    const usedDepots = new Set<string>()
-    for (const supply of plan.supplies) {
-      const locker = lockers.get(supply.lockerId)
-      const depot = depots.get(supply.depotId)
-      if (!locker || !depot || !plan.lockerIds.includes(locker.id) || !plan.depotIds.includes(depot.id) || supplied.has(locker.id)) { errors.push('Invalid or duplicated supply assignment'); continue }
-      supplied.add(locker.id); usedDepots.add(depot.id)
-      const distance = returnFlightMm(locker.xyMm, depot.xyMm)
-      result.longestFlightMm = Math.max(result.longestFlightMm, distance)
-      if (distance > request.flightLimitMm) errors.push(`Return-flight limit failed: ${locker.id}`)
-      result.depotLoads[depot.id] += result.lockerLoads[locker.id]
-    }
-    if (supplied.size !== plan.lockerIds.length) errors.push('Not every open locker has one supplier')
-    if (usedDepots.size !== plan.depotIds.length) errors.push('Unused open depot')
     if (Object.values(result.lockerLoads).some(load => load <= 0 || load > request.lockerCapacity)) errors.push('Locker capacity or use failed')
-    if (Object.values(result.depotLoads).some(load => load <= 0 || load > request.depotCapacity)) errors.push('Shared depot capacity or use failed')
-    if (Object.values(result.depotLoads).reduce((a, b) => a + b, 0) !== result.parcelTotal) errors.push('Supply does not conserve parcels')
+    const verifySupplies = (supplies: NetworkPlan['supplies'], unavailableDepotId: string | undefined, requireEveryDepotUsed: boolean, label: string) => {
+      const supplied = new Set<string>()
+      const usedDepots = new Set<string>()
+      const loads = Object.fromEntries(plan.depotIds.map(id => [id, 0])) as Record<string, number>
+      for (const supply of supplies) {
+        const locker = lockers.get(supply.lockerId)
+        const depot = depots.get(supply.depotId)
+        if (!locker || !depot || !plan.lockerIds.includes(locker.id) || !plan.depotIds.includes(depot.id) || depot.id === unavailableDepotId || supplied.has(locker.id)) { errors.push(`Invalid or duplicated ${label} supply assignment`); continue }
+        supplied.add(locker.id); usedDepots.add(depot.id)
+        const distance = returnFlightMm(locker.xyMm, depot.xyMm)
+        result.longestFlightMm = Math.max(result.longestFlightMm, distance)
+        if (distance > request.flightLimitMm) errors.push(`Return-flight limit failed in ${label}: ${locker.id}`)
+        loads[depot.id] += result.lockerLoads[locker.id]
+      }
+      if (supplied.size !== plan.lockerIds.length) errors.push(`Not every open locker has one supplier in ${label}`)
+      if (requireEveryDepotUsed && usedDepots.size !== plan.depotIds.length) errors.push('Unused open depot')
+      if (Object.values(loads).some(load => load > request.depotCapacity || requireEveryDepotUsed && load <= 0)) errors.push(`Shared depot capacity or use failed in ${label}`)
+      if (Object.values(loads).reduce((a, b) => a + b, 0) !== result.parcelTotal) errors.push(`Supply does not conserve parcels in ${label}`)
+      return loads
+    }
+    result.depotLoads = verifySupplies(plan.supplies, undefined, true, 'normal operation')
+    const outageTolerance = request.depotOutageTolerance ?? 0
+    const outagePlans = plan.outagePlans ?? []
+    if (outageTolerance === 0 && outagePlans.length) errors.push('Unexpected depot outage plans')
+    if (outageTolerance === 1) {
+      const unavailableIds = outagePlans.map(item => item.unavailableDepotId)
+      if (new Set(unavailableIds).size !== unavailableIds.length || unavailableIds.some(id => !plan.depotIds.includes(id))) errors.push('Unknown or duplicated unavailable depot')
+      if (unavailableIds.length !== plan.depotIds.length || plan.depotIds.some(id => !unavailableIds.includes(id))) errors.push('Missing depot outage plan')
+      for (const depotId of plan.depotIds) {
+        const outage = outagePlans.find(item => item.unavailableDepotId === depotId)
+        if (outage) result.outageDepotLoads[depotId] = verifySupplies(outage.supplies, depotId, false, `outage of ${depotId}`)
+      }
+    }
   } catch (error) { errors.push(error instanceof Error ? error.message : String(error)) }
   result.valid = errors.length === 0
   return result

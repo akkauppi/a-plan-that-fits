@@ -60,6 +60,7 @@ export interface Limits {
   lockerCapacity: number
   depotCapacity: number
   flightLimitMm: number
+  depotOutageTolerance?: number
 }
 export interface SolveRequest extends Limits {
   // Omitted = Z3 chooses. [] = exactly zero. Neither means "force these and
@@ -70,11 +71,13 @@ export interface SolveRequest extends Limits {
 }
 export interface CellAssignment { cellId: string; lockerId: string }
 export interface SupplyAssignment { lockerId: string; depotId: string }
+export interface DepotOutagePlan { unavailableDepotId: string; supplies: SupplyAssignment[] }
 export interface NetworkPlan {
   lockerIds: string[]
   depotIds: string[]
   assignments: CellAssignment[]
   supplies: SupplyAssignment[]
+  outagePlans?: DepotOutagePlan[]
 }
 export interface Verification {
   valid: boolean
@@ -82,6 +85,7 @@ export interface Verification {
   parcelTotal: number
   lockerLoads: Record<string, number>
   depotLoads: Record<string, number>
+  outageDepotLoads: Record<string, Record<string, number>>
   worstWalkMm: number
   longestFlightMm: number
   routesChecked: number

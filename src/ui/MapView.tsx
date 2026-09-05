@@ -93,10 +93,12 @@ export function MapView({ scenario, plan, selectedLockers, selectedDepots, cellI
     for (const locker of scenario.lockers) {
       const selected = activeLockers.includes(locker.id)
       const showSupplyReach = gameMode && activeDepots.length > 0
-      const withinSelectedDepotRange = activeDepots.some(depotId => scenario.flights.some(pair => pair.lockerId === locker.id && pair.depotId === depotId && pair.returnDistanceMm <= scenario.defaults.flightLimitMm))
+      const requiredDepotChoices = (scenario.defaults.depotOutageTolerance ?? 0) + 1
+      const depotsWithinRange = activeDepots.filter(depotId => scenario.flights.some(pair => pair.lockerId === locker.id && pair.depotId === depotId && pair.returnDistanceMm <= scenario.defaults.flightLimitMm)).length
+      const withinSelectedDepotRange = depotsWithinRange >= requiredDepotChoices
       const reachDescription = activeDepots.length === 0
-        ? 'choose a depot to see supply reach'
-        : withinSelectedDepotRange ? 'within range of a selected depot' : 'outside all selected depots\' 2 km return range'
+        ? 'choose depots to see backup reach'
+        : withinSelectedDepotRange ? 'within range of two selected depots' : `within range of ${depotsWithinRange} selected depots; needs two`
       const element = document.createElement('button')
       element.className = `map-locker ${selected ? 'active' : ''} ${showSupplyReach && !withinSelectedDepotRange ? 'out-of-depot-range' : ''}`
       element.textContent = locker.id
@@ -147,8 +149,8 @@ export function MapView({ scenario, plan, selectedLockers, selectedDepots, cellI
   return <section className="map-panel" aria-label="Geographic scenario">
     <div ref={container} className="map-canvas" data-testid="map" />
     <div className="map-caption"><span className="eyebrow">ESPOO, FINLAND</span><strong>Tapiola → Otaniemi</strong><span>Real paths & population · hypothetical sites</span></div>
-    <div className="map-key" role="group" aria-label="Map legend"><span><i className="key-cell" />Population cell</span><span><i className="key-locker" />Open locker</span><span><i className="key-candidate" />Candidate</span><span><i className="key-depot" />Supply depot</span>{gameMode && activeDepots.length > 0 && <span><i className="key-out-of-range" />Outside selected depot range</span>}</div>
-    {gameMode && <div className="map-game-help" data-testid="map-game-help"><strong>Build directly on the map</strong><span>Click locker circles and depot labels to toggle them. When a budget is full, deselect one before choosing another.</span>{activeDepots.length > 0 && <span className="range-warning">Coral rings mark lockers outside every selected depot’s exact 2 km return-flight range.</span>}</div>}
+    <div className="map-key" role="group" aria-label="Map legend"><span><i className="key-cell" />Population cell</span><span><i className="key-locker" />Open locker</span><span><i className="key-candidate" />Candidate</span><span><i className="key-depot" />Supply depot</span>{gameMode && activeDepots.length > 0 && <span><i className="key-out-of-range" />No backup depot in range</span>}</div>
+    {gameMode && <div className="map-game-help" data-testid="map-game-help"><strong>Build directly on the map</strong><span>Click locker circles and depot labels to toggle them. When a budget is full, deselect one before choosing another.</span>{activeDepots.length > 0 && <span className="range-warning">Coral rings mark lockers that lack two selected depots within the exact 2 km return-flight range.</span>}</div>}
     {mapError && <p className="map-error" role="alert">{mapError}</p>}
     <div className="route-card">
       <label htmlFor="cell">Inspect a collection journey</label>

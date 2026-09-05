@@ -4,7 +4,7 @@ import { replayCandidateSelection } from './candidate-selection.mjs';
 
 const input = JSON.parse(gunzipSync(await readFile('data/inputs/geography.json.gz')));
 const recipe = JSON.parse(await readFile('data/recipe.json', 'utf8'));
-const audit = replayCandidateSelection(input.network, input.cells);
+const audit = replayCandidateSelection(input.network, input.cells, recipe.candidateSelection);
 if (JSON.stringify(audit.steps.map(step => step.nodeId)) !== JSON.stringify(recipe.lockers.map(([, nodeId]) => nodeId))) {
   throw new Error('Selection replay differs from the frozen recipe. Investigate; do not overwrite the candidate IDs.');
 }

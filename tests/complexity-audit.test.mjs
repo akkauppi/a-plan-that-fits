@@ -7,18 +7,23 @@ const scenario = JSON.parse(await readFile(new URL('../public/data/scenario.json
 
 test('complexity audit exposes raw size, effective pruning and full exact-selection outcomes', async () => {
   const audit = await auditComplexity(scenario)
-  assert.deepEqual(audit.scenario, { id: 'otaniemi-drone-lockers-v1', snapshotId: scenario.snapshotId, cells: 33, lockers: 15, depots: 4 })
-  assert.equal(audit.rawExactSiteSelections, '38610')
-  assert.deepEqual(audit.walking.optionsPerCell, { min: 2, median: 2, max: 4, mean: 2.36 })
-  assert.equal(audit.walking.eligiblePairs, 78)
-  assert.equal(audit.exactBudgetAudit.locallyPlausibleSelections, 16)
-  assert.deepEqual(audit.exactBudgetAudit.fullResults, { feasible: 16, unsat: 0, other: 0 })
+  assert.deepEqual(audit.scenario, { id: 'otaniemi-resilient-drone-lockers-v2', snapshotId: scenario.snapshotId, cells: 33, lockers: 24, depots: 6 })
+  assert.equal(audit.rawExactSiteSelections, '29418840')
+  assert.deepEqual(audit.walking.optionsPerCell, { min: 3, median: 3, max: 6, mean: 3.64 })
+  assert.equal(audit.walking.eligiblePairs, 120)
+  assert.equal(audit.exactBudgetAudit.complete, false)
+  assert.deepEqual(audit.resilienceBoundary, {
+    selectedDepots: 3,
+    depotSelectionsChecked: 20,
+    selectionsWithFullLocalCoverage: 0,
+    bestCoveredCellCount: 27,
+  })
   assert.deepEqual(audit.exhaustiveProfiles.jointDefault, {
-    status: 'feasible', lockerSetsChecked: 903, siteSelectionsChecked: 24,
-    assignmentBranchesVisited: 34, supplyBranchesVisited: 9,
+    status: 'feasible', lockerSetsChecked: 240, siteSelectionsChecked: 173,
+    assignmentBranchesVisited: 36, supplyBranchesVisited: 56,
   })
   assert.deepEqual(audit.exhaustiveProfiles.oneFewerLocker, {
-    status: 'unsat', lockerSetsChecked: 16384, siteSelectionsChecked: 0,
-    assignmentBranchesVisited: 0, supplyBranchesVisited: 0,
+    status: 'feasible', lockerSetsChecked: 15744, siteSelectionsChecked: 173,
+    assignmentBranchesVisited: 34, supplyBranchesVisited: 51,
   })
 })

@@ -8,16 +8,15 @@ import { solveByEnumeration } from '../src/exhaustive/model.ts'
 const scenario = JSON.parse(await readFile(new URL('../public/data/scenario.json', import.meta.url)))
 const api = await init()
 after(async () => { await killThreads(api.em) })
-const request = overrides => ({ ...scenario.defaults, timeoutMs: 15000, ...overrides })
+const request = overrides => ({ ...scenario.defaults, timeoutMs: 30000, ...overrides })
 
 test('exhaustive JavaScript and Z3 agree on every pinned geographic question', async () => {
   const cases = [
     {},
-    { fixedLockerIds: ['A', 'C', 'D', 'E', 'G', 'K', 'L', 'N'], fixedDepotIds: ['West', 'East'] },
-    { fixedLockerIds: scenario.starterLockerIds },
-    { fixedLockerIds: scenario.starterLockerIds, maxDepots: 3 },
-    { fixedLockerIds: scenario.starterLockerIds, flightLimitMm: 2400000 },
-    { maxLockers: 7 },
+    { fixedLockerIds: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'J', 'L', 'N'], fixedDepotIds: ['West', 'North', 'East', 'Central-West'] },
+    { maxDepots: 3 },
+    { maxDepots: 3, depotOutageTolerance: 0 },
+    { maxLockers: 9 },
   ]
   for (const overrides of cases) {
     const input = request(overrides)

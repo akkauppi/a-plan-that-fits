@@ -18,8 +18,9 @@ npm run test:e2e
 | `npm run preview` | Serve the existing build on localhost |
 | `npm run data:build` | Rebuild the committed scenario from frozen inputs and recipe |
 | `npm run data:validate` | Check source hashes and byte-identical deterministic rebuild without writing |
-| `npm run data:audit-candidates` | Replay how the 15 locker candidates were chosen; compare to the frozen recipe without writing |
+| `npm run data:audit-candidates` | Replay how the 24 locker candidates were chosen; compare to the frozen recipe without writing |
 | `npm run data:audit-complexity` | Report deterministic raw/effective search-space counts and brute-force branch profiles without writing |
+| `npm run data:explore-expansion` | Derive and audit the read-only 24-locker/6-depot resilience proposal without writing |
 | `npm test` | Real Z3 regression cases, exhaustive oracle, data checks and client lifecycle tests |
 | `npm run check` | Types + data validation + Node tests + production build |
 | `npm run test:e2e` | Test existing `dist/` in browsers under `/tour/`, without isolation headers |
@@ -75,7 +76,7 @@ Shared memory requires a secure, isolated browsing context. The project-local [c
 
 Current acceptance covers Chromium desktop and tablet viewports. Other engines and embedded corporate browsers are not certified by this slice. WebGL is needed for the map, but the narrative, site controls and numeric route details remain available if map creation fails. WebAssembly, workers, `SharedArrayBuffer` and site isolation are required for solving. Unsupported or restricted contexts show an explanation; there is no silent remote solver.
 
-Each client serializes solves. Cancellation terminates its worker, invalidates its generation, and starts a fresh runtime; Z3 additionally receives an interrupt. Wrong request IDs and old-worker replies are ignored. Solver timeout defaults to 15 seconds; the client watchdog allows 5 additional seconds before restarting. Initial loading has a 60-second watchdog. These limits yield no conclusion, never UNSAT.
+Each client serializes solves. Cancellation terminates its worker, invalidates its generation, and starts a fresh runtime; Z3 additionally receives an interrupt. Wrong request IDs and old-worker replies are ignored. Expanded-tour requests use a 30-second solver limit; the client watchdog allows 5 additional seconds before restarting. Initial loading has a 60-second watchdog. These limits yield no conclusion, never UNSAT.
 
 This is not an offline cache: the service worker forwards requests and adds headers. First load includes roughly 34 MB of WASM and 9 MB of uncompressed geography, plus the app/runtime scripts. No third-party assets or service calls are required while following the tour. External reference links open only when followed.
 
@@ -96,6 +97,6 @@ These follow [GitHub's custom Pages workflow documentation](https://docs.github.
 
 ## Tests and interpretation
 
-The Node suite includes exhaustive enumeration of 32 tiny budget/capacity/range combinations plus exact-selection cases, independently compared with real Z3. The geographic fixture suite checks the pinned teaching cases and every offered repair. Mutation tests reject omitted eligible walks, route corruption, missing/duplicated demand, unreachable supply and shared-capacity violations. Client tests use a fake worker only for timing and stale-message control; the model and browser acceptance use real Z3.
+The Node suite includes exhaustive enumeration of 32 tiny budget/capacity/range combinations plus exact-selection cases, independently compared with real Z3. A separate tiny outage oracle proves that redundant range alone is insufficient, compares both engines on feasible and impossible capacity-aware contingencies, and mutates returned outage plans against the independent verifier. The geographic fixture suite checks the pinned teaching cases and every offered repair. Mutation tests reject omitted eligible walks, route corruption, missing/duplicated demand, unreachable supply and shared-capacity violations. Client tests use a fake worker only for timing and stale-message control; the model and browser acceptance use real Z3.
 
-The browser suite checks a cold service-worker bootstrap, an empty game start, map/keyboard site toggles for lockers and depots, exact flight-table-based reach warnings, exact-selection failure, a manual exact-plan win, the solver escape hatch, selection invalidation, general starter failure, verified joint success, sequential Z3/brute-force comparisons for feasible and impossible questions, both repairs, seven-locker impossibility, local-only asset requests, keyboard dialog behaviour and an unsupported-browser explanation. It captures start/game-empty/game-range/game-win/conflict/solved/comparison-feasible/comparison-impossible screenshots at desktop and tablet sizes. It is not yet a full accessibility audit, long-running stress test or multi-engine certification.
+The browser suite checks a cold service-worker bootstrap, an empty game start, map/keyboard site toggles, exact flight-table-based backup warnings, a manual exact resilient win, the solver escape hatch, verified outage plans, the three-depot impossibility, sequential Z3/brute-force comparisons, rule-change experiments, local-only asset requests, keyboard dialog behaviour and an unsupported-browser explanation. It captures the major story states at desktop and tablet sizes. It is not yet a full accessibility audit, long-running stress test or multi-engine certification.

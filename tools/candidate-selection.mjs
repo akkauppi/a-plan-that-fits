@@ -3,7 +3,7 @@ import { graphIndex, shortestPaths } from '../src/core/graph.ts';
 // Explain/replay the frozen teaching shortlist, NOT a production siting method.
 // This chooses possible sites from geography alone. It does not call Z3, solve
 // capacity/supply, or replace the canonical candidate IDs in data/recipe.json.
-export function replayCandidateSelection(network, cells) {
+export function replayCandidateSelection(network, cells, { minimumChoices = 2, minimumSpacingMm = 80000 } = {}) {
   const graph = graphIndex(network);
   const optionsByNode = new Map();
   for (const cell of cells) {
@@ -17,13 +17,13 @@ export function replayCandidateSelection(network, cells) {
   const choicesPerCell = new Map(cells.map(cell => [cell.id, 0]));
   const selected = [];
   const steps = [];
-  while ([...choicesPerCell.values()].some(count => count < 2)) {
+  while ([...choicesPerCell.values()].some(count => count < minimumChoices)) {
     let best;
     for (const [nodeId, options] of optionsByNode) {
       const node = graph.nodes.get(nodeId);
-      const tooClose = selected.some(site => Math.hypot(site.xyMm[0] - node.xyMm[0], site.xyMm[1] - node.xyMm[1]) < 80000);
+      const tooClose = selected.some(site => Math.hypot(site.xyMm[0] - node.xyMm[0], site.xyMm[1] - node.xyMm[1]) < minimumSpacingMm);
       if (tooClose) continue;
-      const useful = options.filter(option => choicesPerCell.get(option.cellId) < 2);
+      const useful = options.filter(option => choicesPerCell.get(option.cellId) < minimumChoices);
       if (!useful.length) continue;
       const candidate = { node, options, gain: useful.length, worstUsefulWalkMm: Math.max(...useful.map(option => option.distanceMm)) };
       // Most cells helped first; then shortest worst useful walk; then stable ID.
@@ -32,7 +32,7 @@ export function replayCandidateSelection(network, cells) {
         candidate.worstUsefulWalkMm === best.worstUsefulWalkMm && node.id < best.node.id
       )) best = candidate;
     }
-    if (!best) throw new Error('Cannot give each cell two choices with the 80 m candidate-spacing rule.');
+    if (!best) throw new Error(`Cannot give each cell ${minimumChoices} choices with the ${minimumSpacingMm / 1000} m candidate-spacing rule.`);
     selected.push(best.node);
     for (const option of best.options) choicesPerCell.set(option.cellId, choicesPerCell.get(option.cellId) + 1);
     steps.push({
@@ -42,5 +42,5 @@ export function replayCandidateSelection(network, cells) {
       worstUsefulWalkMm: best.worstUsefulWalkMm,
     });
   }
-  return { consideredNodes: optionsByNode.size, steps, minimumChoicesPerCell: Math.min(...choicesPerCell.values()) };
+  return { consideredNodes: optionsByNode.size, steps, minimumChoicesPerCell: Math.min(...choicesPerCell.values()), requestedMinimumChoices: minimumChoices, minimumSpacingMm };
 }

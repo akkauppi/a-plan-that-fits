@@ -4,9 +4,9 @@ A hands-on introduction to **constraint solving on a real map**. One self-guided
 
 A constraint is a rule a plan must meet. A constraint solver searches for choices that satisfy all the rules together—and can prove that none work within the model. This tour uses **Z3**, a general-purpose solver, to explore that idea in a geographic context. See [an introduction to constraint solving](https://developers.google.com/optimization/cp) and [Microsoft Research's description of Z3](https://www.microsoft.com/en-us/research/project/z3-3/).
 
-**Can this neighbourhood deliver?** People need a short walk to a parcel locker. Drones need a workable supply network. Can we choose the locations so every rule is met?
+**Can this neighbourhood keep delivering?** People need a short walk to a parcel locker. Drones need a supply network that still works when one depot is unavailable. Can we choose the locations so every rule is met?
 
-A coverage map is only the beginning. The locker locations, parcel assignments, supply depots, capacities and drone connections must work together. The tour starts with a collection plan that looks reasonable but cannot be supplied from two depots. Z3 can find a working network when it chooses the lockers and depots jointly.
+A coverage map is only the beginning. The locker locations, parcel assignments, supply depots, capacities and drone connections must work together on a normal day and after each possible depot outage. Z3 chooses and checks those coupled decisions jointly.
 
 This is a first vertical slice, not an operational urban-planning or drone product. It uses real paths and published population cells around Tapiola–Otaniemi in Espoo, with explicitly hypothetical sites and operating rules. It does not claim Z3 is the only suitable solver.
 
@@ -33,20 +33,20 @@ Serve over HTTPS or localhost; double-clicking `index.html` with `file://` will 
 ## What the tour teaches
 
 1. **The question:** residents walk to lockers; drones supply them from depots.
-2. **Play the planning puzzle:** start with no selected sites, choose among 15 locker candidates and submit exactly eight lockers and two depots. Lockers and depots toggle directly on the map or with equivalent labelled buttons. Once a depot is selected, coral rings mark every candidate outside all selected depots’ exact 2 km return-flight range. Quick map checks expose simple gaps; Z3 checks the hidden assignments and shared capacities.
-3. **Reveal the conflict:** that locker layout needs at least three depots under the flight rule.
-4. **Let Z3 choose:** keep the rules, but choose all locations and assignments together. Then send the identical request to a transparent exhaustive JavaScript solver and compare one warm run without claiming a universal speed benchmark.
-5. **Explore:** add a depot, extend drone range, or test whether seven lockers suffice.
+2. **Play the planning puzzle:** start with no selected sites, choose among 24 locker candidates and submit exactly ten lockers and four depots. Coral rings mark candidates that lack two selected depots within the exact 2 km return-flight range. Quick map checks expose geographic gaps; Z3 checks hidden assignments and shared capacity in normal operation and four outage cases.
+3. **Add resilience:** ask whether three depots could survive one outage. Across all 20 depot choices, robust lockers cover at most 27 of 33 cells, so Z3 proves the full question impossible.
+4. **Let Z3 choose:** restore four depots and choose all locations and assignments together. Send the identical request to transparent exhaustive JavaScript and compare finding an early plan with proving the three-depot boundary impossible.
+5. **Explore:** remove the outage rule, restore the fourth depot, or test a nine-locker budget.
 
 The walking limit remains **500 m throughout**. All feasible answers are checked again by separate JavaScript code. A timeout, cancellation or error is never presented as an impossibility proof. The result is feasible, not necessarily optimal.
 
-The geography contains 33 population cells, 8,554 published residents, 15 hypothetical locker candidates and four hypothetical depots. Illustrative demand is one parcel per ten residents, rounded up separately in each cell: 871 parcels/day. A representative point stands for each cell; this is not a household-level accessibility guarantee.
+The geography contains 33 population cells, 8,554 published residents, 24 hypothetical locker candidates and six hypothetical depots. Illustrative demand is one parcel per ten residents, rounded up separately in each cell: 871 parcels/day. A representative point stands for each cell; this is not a household-level accessibility guarantee.
 
-The candidate shortlist is generated from walking geography, not selected by Z3: a simple coverage procedure adds sites at least 80 m apart until every cell has two options within 500 m. The tour explains this under “Where did the candidate sites come from?”. `npm run data:audit-candidates` replays the procedure and reproduces the same 15 sites, without changing data. See [the exact method](data/README.md#how-the-candidate-shortlist-was-selected).
+The candidate shortlist is generated from walking geography, not selected by Z3: a simple coverage procedure adds sites at least 80 m apart until every cell has three options within 500 m. The tour explains this under “Where did the candidate sites come from?”. `npm run data:audit-candidates` replays the procedure and reproduces the same 24 sites without changing data. See [the exact method](data/README.md#how-the-candidate-shortlist-was-selected).
 
-`npm run data:audit-complexity` measures the difference between the headline search space and effective difficulty. It deterministically reports choice degrees, raw exact site combinations, selections that pass the visible checks, full feasible/impossible counts and brute-force branches for representative feasible and impossible questions. It deliberately excludes unstable elapsed-time assertions.
+`npm run data:audit-complexity` measures the difference between the 29,418,840 exact site combinations and effective difficulty. It reports choice degrees, deterministic exhaustive branch profiles and the complete 20-choice geographic proof that three depots cannot survive an outage. It deliberately excludes unstable elapsed-time assertions and does not attempt to hold all exact site combinations in memory.
 
-Step 1 is inspection-only: explore population cells and their collection journeys in a prepared eight-locker example. Step 2 starts empty; map markers and equivalent labelled buttons toggle both locker and depot choices. Depot-reach highlighting is derived from the same frozen flight table and exact return-distance limit used by the model; it is not an approximate radius drawn around a depot. At least one eight-locker/two-depot solution exists. “Let Z3 find a plan” provides an escape hatch and a direct comparison with the player’s choices.
+Step 1 is inspection-only: explore population cells and collection journeys in a prepared example. Step 2 starts empty; map markers and equivalent labelled buttons toggle both locker and depot choices. Backup-reach highlighting is derived from the same frozen flight table and exact return-distance limit used by the model; it is not an approximate radius. At least one exact ten-locker/four-depot resilient solution is tested. “Let Z3 find a plan” provides an escape hatch.
 
 ## Verify or continue development
 

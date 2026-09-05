@@ -3,6 +3,7 @@ import { gunzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { graphIndex, shortestPaths, routeEdges } from '../src/core/graph.ts';
 import { validateScenario } from '../src/core/validate.ts';
+import { replayCandidateSelection } from './candidate-selection.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const inputBytes = gunzipSync(await readFile('data/inputs/geography.json.gz'));
@@ -20,6 +21,10 @@ const sites = (items, kind) => items.map(([id, nodeId]) => {
   if (!node) throw new Error(`Missing ${kind} node ${nodeId}`);
   return { ...node, id, nodeId, label: `${kind} ${id}` };
 });
+const candidateReplay = replayCandidateSelection(input.network, input.cells, recipe.candidateSelection);
+if (JSON.stringify(candidateReplay.steps.map(step => step.nodeId)) !== JSON.stringify(recipe.lockers.map(([, nodeId]) => nodeId))) {
+  throw new Error('Locker recipe does not match its candidate-selection rule. Review the derivation; do not hand-edit generated data.');
+}
 const lockers = sites(recipe.lockers, 'Locker');
 const depots = sites(recipe.depots, 'Depot');
 const walking = input.cells.flatMap(cell => {
