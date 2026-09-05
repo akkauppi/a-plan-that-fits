@@ -35,7 +35,7 @@ Serve over HTTPS or localhost; double-clicking `index.html` with `file://` will 
 1. **The question:** residents walk to lockers; drones supply them from depots.
 2. **Play the planning puzzle:** start with no selected sites, choose among 24 locker candidates and submit exactly ten lockers and four depots. Coral rings mark candidates that lack two selected depots within the exact 2 km return-flight range. Quick map checks expose geographic gaps; Z3 checks hidden assignments and shared capacity in normal operation and four outage cases.
 3. **Add resilience:** ask whether three depots could survive one outage. Across all 20 depot choices, robust lockers cover at most 27 of 33 cells, so Z3 proves the full question impossible.
-4. **Let Z3 choose:** restore four depots and choose all locations and assignments together. Send the identical request to transparent exhaustive JavaScript and compare finding an early plan with proving the three-depot boundary impossible.
+4. **Let Z3 choose:** restore four depots and choose all locations and assignments together. The comparison defaults to proving the three-depot boundary impossible; an optional feasible run demonstrates that brute force can find an early lucky branch faster.
 5. **Explore:** remove the outage rule, restore the fourth depot, or test a nine-locker budget.
 
 The walking limit remains **500 m throughout**. All feasible answers are checked again by separate JavaScript code. A timeout, cancellation or error is never presented as an impossibility proof. The result is feasible, not necessarily optimal.
