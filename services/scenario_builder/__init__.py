@@ -1,6 +1,6 @@
 """Typed contracts for building reproducible, location-driven scenarios.
 
-This package is deliberately independent from the current Four Planters runtime.
+This package is deliberately independent from the current modal-filter runtime.
 It defines the input and provenance seam for future builders without changing the
 checked-in Kallio--Vallila scenario or solver API.
 """

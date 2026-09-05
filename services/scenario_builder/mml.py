@@ -246,7 +246,7 @@ def _default_transport(url: str, timeout_s: int, api_key: str) -> bytes:
         headers={
             "Accept": MML_OUTPUT_FORMAT,
             "Authorization": f"Basic {basic_token}",
-            "User-Agent": "Four-Planters-Scenario-Builder/1.0",
+            "User-Agent": "Geospatial-Constraint-Lab-Scenario-Builder/1.0",
         },
     )
     try:

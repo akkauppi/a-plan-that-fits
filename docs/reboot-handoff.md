@@ -1,19 +1,39 @@
-# Four Planters final-baseline handoff
+# Geospatial Constraint Lab: reboot handoff
 
-> Four Planters entered completed-baseline status on 2026-08-30. This file preserves
-> its reproducible release evidence. New work should follow the
-> [resilient-access decision and roadmap](project-status-and-roadmap.md) without
-> weakening this baseline.
+> The Kallio experiment was originally released under the Four Planters name and
+> entered completed-baseline status on 2026-08-30. This file preserves that
+> reproducible release evidence while also recording the current three-experiment
+> Geospatial Constraint Lab handoff. Shared work should follow the
+> [project history and roadmap](project-status-and-roadmap.md) without weakening any
+> frozen experiment's regression contract.
 
 - **Final baseline evidence:** 2026-08-28
 - **Lifecycle decision recorded:** 2026-08-30
+- **Flood-resilient-access vertical slice:** 2026-08-31
+- **Equitable-service-coverage vertical slice:** 2026-09-03
 
 This file began as the reboot note and now records the reproducible release state.
 The frozen source snapshot is unchanged; the portal model, access objective,
 independent verifier, timeout controls, and release interface have been corrected
 since the initial checkpoint.
 
-## What is implemented
+## Current lab state
+
+The browser presents three equal experiments under the Geospatial Constraint Lab
+umbrella:
+
+1. modal-filter placement on the frozen Kallio private-car graph;
+2. flood/roadworks access resilience on the frozen Otaniemi graph; and
+3. capacitated public-service allocation on the frozen Otaniemi–Tapiola walking
+   graph.
+
+The first two alter network availability and use counterexample-guided graph
+refinement. The third compiles its complete 33 × 10 network-distance relation first
+and lets Z3 choose sites and assignments directly. All distinguish verified
+feasibility, verified infeasibility, and indeterminate outcomes, and all keep source
+facts separate from analytical assumptions.
+
+## Kallio baseline implementation
 
 - A React/MapLibre browser instrument with real frozen Helsinki streets, buildings,
   protected features, boundary portals, address clusters, oriented candidate filters,
@@ -31,10 +51,12 @@ since the initial checkpoint.
 
 The audited default two-pair Helsinki request has a verified optimum using four
 filters under a maximum budget of four. The budget is an upper bound, not an
-exact-count requirement. A result reaches a verified label only after a fresh NetworkX graph confirms
-the requested private-car disconnections and local address-cluster egress.
+exact-count requirement. A feasible result reaches a verified label only after a
+fresh NetworkX graph confirms the requested private-car disconnections and local
+address-cluster egress. Verified UNSAT instead relies on Z3 over sound learned route
+clauses and hard constraints, or on a specific unblockable graph-verifier finding.
 
-## Frozen scenario and portal semantics
+## Kallio frozen scenario and portal semantics
 
 The study bbox is `[24.9435, 60.1854, 24.9635, 60.1962]`, about 1.33 km² across
 Kallio, Alppiharju, and western Vallila. The OpenStreetMap base timestamp is
@@ -80,7 +102,7 @@ cross-neighbourhood permeability). The budget-four optimum uses four filters out
 both zones. These setbacks reduce terminal-capping solutions, but they are analytical
 bias controls rather than physical or legal siting rules.
 
-## Objectives and connectivity semantics
+## Kallio objectives and connectivity semantics
 
 The objectives are lexicographic and returned explicitly:
 
@@ -98,7 +120,7 @@ Before/after regions are directed strongly connected components: each region is 
 maximal node set with mutual private-car reachability while respecting one-way
 streets. They are a topology view, not traffic volumes or displacement estimates.
 
-## Proof and data boundaries
+## Kallio proof and data boundaries
 
 The frozen graph is derived directly from a committed, bounded Overpass response by
 the custom deterministic topology pipeline in `scripts/build_scenario.py`. It
@@ -112,7 +134,7 @@ routed or independently proved here. Service access is unsupported and requests 
 enable it are rejected with HTTP 422. Protected tram/public-transport geometry is a
 conservative OSM-tag abstraction, not a complete operations model.
 
-## Recorded evidence
+## Kallio recorded evidence
 
 For the 2026-08-28 dual-setback revision, deterministic preprocessing and strict
 geometry/reference reconstruction passed twice in 4.27–4.32 seconds per rebuild.
@@ -148,11 +170,65 @@ Vite's passing production build currently emits one large JavaScript-chunk advis
 performance limitation; code-splitting MapLibre and secondary panels is the most
 direct remedy.
 
+## Experiment 03 frozen handoff
+
+The service-coverage scenario is
+`service-coverage-otaniemi-tapiola-v1`, snapshot
+`coverage-4e7e682613eb7d074b8a3341`, observed at
+`2026-09-01T10:10:33.425Z`. Its bbox is
+`[24.802, 60.172, 24.8425, 60.1912]`. The checked artifact contains:
+
+```text
+33 published HSY 250 m population cells / 8,554 included residents
+10 reviewed Helsinki metropolitan Service Map venues
+330 connector-inclusive demand/site distances and route geometries
+3,207 compact verification nodes / 4,426 directed edges
+15,315 walking-network display features
+```
+
+The population WFS response is timestamped `2026-09-01T09:18:48.333Z`;
+all selected features report source update `2026-08-05Z`. The ten candidate units
+are frozen from their exact Service Map endpoints. HSY and Service Map are CC BY 4.0;
+the reused OSM walking snapshot `base-c8dcbcfaca2b2c9498420681` is ODbL 1.0.
+Exact endpoints, timestamps, checksums, CRS handling, privacy cautions, and reviewed
+IDs are in the [evidence note](service-coverage-data-notes.md) and
+[source manifest](../data/source/service-coverage/otaniemi-tapiola-v1/source-manifest.json).
+
+Each distance is demand-point straight-line snap connector + directed graph shortest
+path + site-point straight-line snap connector. Both connectors are disclosed analytical
+approximations, and each record retains its component distances and ordered graph chain
+for fresh verification.
+
+The default request is at most four sites, 1,600 m, capacity multiplier 1.0, and a
+30-second deadline. It is verified optimal with Haukilahden lukio and Tapiolan
+nuorisotila selected, all 33 cells assigned, 1,231.82 m worst distance, 757.83 m
+population-weighted mean distance, loads 4,248/4,306, and objective vector
+`[2, 123182, 648245240, 58]`. The names are a
+reproducibility observation, not a recommendation. Budget one is verified UNSAT
+because a single declared 5,000-person site cannot serve 8,554 included people; a
+1,000 m threshold produces a separate geographic coverage-gap UNSAT. Timeout is
+indeterminate.
+
+The 5,000-person capacity is an analytical teaching assumption, not a Service Map
+fact or operational capacity. Each HSY cell is an indivisible aggregate represented
+by one snapped point; suppressed population is not imputed. Verification proves the
+encoded assignment on the frozen walking graph, not facility suitability,
+accessibility for every resident, demand, staffing, availability, legal use, service
+quality, or equity. The [method note](service-coverage-foundation.md) records the
+full model and proof boundary.
+
+The highest-value next extension is robust multi-scenario allocation: choose one
+`open[site]` portfolio while allowing assignments to adapt under normal,
+one-site-outage, and source-grounded flood/roadworks walking-network conditions.
+This connects the second and third experiments and creates a genuinely coupled
+portfolio decision without changing the frozen baseline.
+
 ## Run locally
 
 ```bash
 make setup
 make data-validate
+make service-coverage-validate
 make dev
 ```
 
@@ -160,6 +236,23 @@ Open <http://127.0.0.1:5173>. The API listens on
 <http://127.0.0.1:8000>. Ordinary startup and `make data` use the committed archive
 without contacting OSM. Only the explicit `make data-refresh` command calls Overpass
 and replaces the source snapshot.
+
+Service-coverage replay is also offline by default:
+
+```bash
+make service-coverage          # deterministic rebuild from committed evidence
+make service-coverage-validate # sources/files, normalized IDs, graph and 330 routes
+make service-coverage-test     # frozen-evidence and tamper-regression tests
+```
+
+The 2026-09-03 handoff rerun reproduced byte-identical published JSON on two consecutive
+offline builds, passed offline validation, and passed the focused frozen-evidence and
+pipeline tamper-regression tests. Use the final integrated acceptance run for combined
+solver, API, frontend, and browser counts.
+
+Only `make service-coverage-refresh` contacts HSY WFS and the ten exact Service Map
+unit endpoints. Treat it as an intentional source update that changes the frozen
+snapshot, never as a startup step.
 
 ## Release screenshots
 
@@ -171,6 +264,14 @@ The passing Playwright run wrote all eight committed captures below:
 | Verified | [desktop](screenshots/four-planters-verified-desktop.png) | [tablet](screenshots/four-planters-verified-tablet.png) |
 | Compare | [desktop](screenshots/four-planters-compare-desktop.png) | [tablet](screenshots/four-planters-compare-tablet.png) |
 | UNSAT | [desktop](screenshots/four-planters-unsat-desktop.png) | [tablet](screenshots/four-planters-unsat-tablet.png) |
+
+Experiment 03 review captures are:
+
+| State | Desktop | Tablet |
+| --- | --- | --- |
+| Before | [desktop](screenshots/geospatial-constraint-lab-service-coverage-before-desktop.png) | [tablet](screenshots/geospatial-constraint-lab-service-coverage-before-tablet.png) |
+| Verified | [desktop](screenshots/geospatial-constraint-lab-service-coverage-verified-desktop.png) | [tablet](screenshots/geospatial-constraint-lab-service-coverage-verified-tablet.png) |
+| UNSAT | [desktop](screenshots/geospatial-constraint-lab-service-coverage-unsat-desktop.png) | [tablet](screenshots/geospatial-constraint-lab-service-coverage-unsat-tablet.png) |
 
 ## Git metadata in this environment
 

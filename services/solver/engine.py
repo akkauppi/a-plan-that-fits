@@ -18,7 +18,7 @@ import z3
 from .models import PortalPair, SolveRequest
 from .scenario import Scenario, distance_metres
 
-LOGGER = logging.getLogger("four_planters.solver")
+LOGGER = logging.getLogger("geospatial_constraint_lab.modal_filter_solver")
 
 
 @dataclass(frozen=True)
@@ -1172,7 +1172,7 @@ class FourPlantersSolver:
 
         watcher = threading.Thread(
             target=interrupt_when_cancelled,
-            name="four-planters-z3-cancel",
+            name="geospatial-lab-z3-cancel",
             daemon=True,
         )
         watcher.start()

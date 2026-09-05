@@ -209,7 +209,7 @@ class ScenarioBuilderService:
                 "unchanged": True,
                 "message": (
                     "Building a successor base network does not replace or mutate the active "
-                    "Four Planters solver scenario."
+                    "modal-filter experiment scenario."
                 ),
             },
         }

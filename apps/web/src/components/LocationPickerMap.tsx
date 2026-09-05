@@ -10,7 +10,7 @@ const EARTH_RADIUS_M = 6_371_008.8
 
 const LOCATOR_STYLE: StyleSpecification = {
   version: 8,
-  name: 'Four Planters location picker',
+  name: 'Geospatial Constraint Lab location picker',
   sources: {},
   layers: [
     { id: 'locator-paper', type: 'background', paint: { 'background-color': '#e5e5de' } },

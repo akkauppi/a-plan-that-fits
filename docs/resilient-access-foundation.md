@@ -5,13 +5,13 @@
 - **Profile:** `finland-resilient-access-v1`
 - **Pilot:** Otaniemi coastal core, Espoo
 - **Runtime status:** reproducible source, terrain, network, and exposure pipeline;
-  Otaniemi-first browser; streaming Z3/NetworkX access solver; bounded custom-location
+  streaming Z3/NetworkX access solver; bounded custom-location
   base builder
 
 ## What exists
 
-The repository has a second, deliberately separate experiment beside the completed
-Kallio Four Planters demonstrator. It accepts a strict versioned recipe, uses
+This is one of two equal experiments in Geospatial Constraint Lab, alongside Kallio
+modal-filter placement. It accepts a strict versioned recipe, uses
 source-specific adapters with fixed endpoints, freezes their responses by checksum,
 builds a directed multi-mode OSM base network, and intersects that network with the
 published Syke 1/100 and 1/1000 coastal-flood zones. A separate adapter freezes the
@@ -77,10 +77,11 @@ passability, or safety.
 
 ## Location workflow
 
-The browser now opens an **Otaniemi resilient-access** research workspace first,
-with the completed Kallio planter solver preserved as the switchable baseline. Its
-study-area instrument and a small FastAPI job service expose the first bounded
-location workflow. The frozen Otaniemi preset is the default. A user
+The browser exposes **Otaniemi resilient access** and **Kallio modal-filter
+placement** at the same experiment hierarchy. Within the resilient-access
+experiment, its study-area instrument and a small FastAPI job service expose the
+first bounded location workflow. The frozen Otaniemi preset is the experiment's
+default. A user
 may instead click an offline coordinate canvas or enter a precise Finland WGS84
 longitude/latitude, choose a 500, 750, 1,000, 1,500, or 2,000 m browser radius,
 preflight the resulting recipe, inspect local archive readiness and coverage
@@ -88,7 +89,7 @@ warnings, start an offline base-network build, follow real event history, and
 request cancellation. The underlying API accepts 100–2,500 m. The canvas is a
 coordinate picker, not a live basemap or place search, so it makes no background
 tile request. A completed job publishes a verified base-network artifact; it does
-not switch the active Otaniemi resilience graph or the preserved Kallio graph.
+not switch the active Otaniemi resilience graph or the separate Kallio graph.
 
 ```text
 GET  /api/scenario-builder/catalog
@@ -434,6 +435,13 @@ stable IDs break remaining ties. The budget counts groups, while the result also
 reports the exact expanded physical-fragment count. This prevents raw OSM
 segmentation from masquerading as dozens of independent decisions, but the grouping
 is still an analytical convention rather than an engineering project definition.
+Setting a group's Boolean to true restores only its fragments that were removed by
+the enabled flood-exposure assumption. Declared fixed roadworks are removed before
+grouping and cannot be restored by any continuity commitment. A selected group
+belongs to the returned optimum only in the encoded availability model and may be
+replaceable in an equally good alternative; it does not establish that any expanded
+fragment is physically safe, legally available, operable, funded, or practically
+protectable.
 
 The reachability requirement is checked by NetworkX rather than encoded as an
 enumeration of all paths in Z3:
@@ -451,6 +459,14 @@ enumeration of all paths in Z3:
    one selected exit or the accumulated constraints are UNSAT.
 6. A fresh directed NetworkX graph then reconstructs availability and repeats every
    required reachability check for the final selected zones.
+
+This **access-frontier clause** differs from the modal-filter experiment's
+**path-cut clause**. Here, the frontier lists alternative `passable[...]` groups at
+the edge of an origin's directed reachable region, so at least one must be restored
+to preserve access. In Kallio, a surviving forbidden portal route lists eligible
+`blocked[...]` candidates, so at least one must be selected to break that route.
+Both are necessary constraints learned from a real graph counterexample, but they
+have opposite network intent: retain a connection versus sever one.
 
 The magenta diagnostic route is visual evidence of why the current proposal fails;
 it is not itself the learned constraint. The orange frontier/continuity zones are

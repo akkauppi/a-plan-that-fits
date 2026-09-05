@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
 import {
   Archive,
   Building2,
@@ -46,6 +53,26 @@ const DEFAULT_CUSTOM_AREA = {
   radius_m: 1_000,
 }
 
+const DRAWER_FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  'summary',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+function drawerFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(DRAWER_FOCUSABLE_SELECTOR))
+    .filter((element) => {
+      if (element.matches(':disabled') || element.closest('[hidden], [inert]')) return false
+      if (element.getAttribute('aria-hidden') === 'true') return false
+      const closedDetails = element.closest('details:not([open])')
+      return !closedDetails || element.tagName === 'SUMMARY'
+    })
+}
+
 interface ScenarioBuilderDrawerProps {
   onClose?: () => void
   variant?: 'drawer' | 'workspace'
@@ -55,6 +82,10 @@ export function ScenarioBuilderDrawer({
   onClose,
   variant = 'drawer',
 }: ScenarioBuilderDrawerProps) {
+  const drawerRef = useRef<HTMLElement>(null)
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+  const focusRestoredRef = useRef(false)
   const [catalog, setCatalog] = useState<BuilderCatalog>()
   const [mode, setMode] = useState<'preset' | 'custom'>('preset')
   const [customArea, setCustomArea] = useState(DEFAULT_CUSTOM_AREA)
@@ -112,6 +143,61 @@ export function ScenarioBuilderDrawer({
   }, [runPreflight])
 
   const jobActive = job ? ACTIVE_JOB_STATES.includes(job.status) : false
+
+  const restorePreviousFocus = useCallback(() => {
+    if (focusRestoredRef.current) return
+    focusRestoredRef.current = true
+    const previousFocus = previousFocusRef.current
+    if (previousFocus?.isConnected) previousFocus.focus()
+  }, [])
+
+  useEffect(() => {
+    if (variant !== 'drawer') return
+    previousFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    focusRestoredRef.current = false
+    titleRef.current?.focus()
+    return restorePreviousFocus
+  }, [restorePreviousFocus, variant])
+
+  const closeDrawer = useCallback(() => {
+    if (variant !== 'drawer' || jobActive || !onClose) return
+    restorePreviousFocus()
+    onClose()
+  }, [jobActive, onClose, restorePreviousFocus, variant])
+
+  const handleDrawerKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (variant !== 'drawer') return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      if (!jobActive) closeDrawer()
+      return
+    }
+    if (event.key !== 'Tab') return
+
+    const drawer = drawerRef.current
+    if (!drawer) return
+    const focusable = drawerFocusableElements(drawer)
+    if (!focusable.length) {
+      event.preventDefault()
+      titleRef.current?.focus()
+      return
+    }
+
+    const first = focusable[0]
+    const last = focusable.at(-1)
+    const active = document.activeElement
+    const activeIsInSequence = active instanceof HTMLElement && focusable.includes(active)
+    if (event.shiftKey && (active === first || !activeIsInSequence)) {
+      event.preventDefault()
+      last?.focus()
+    } else if (!event.shiftKey && (active === last || !activeIsInSequence)) {
+      event.preventDefault()
+      first?.focus()
+    }
+  }, [closeDrawer, jobActive, variant])
 
   useEffect(() => {
     if (!job || !ACTIVE_JOB_STATES.includes(job.status)) return
@@ -171,15 +257,22 @@ export function ScenarioBuilderDrawer({
 
   return (
     <aside
+      ref={drawerRef}
       className={`builder-drawer ${variant === 'workspace' ? 'builder-drawer--workspace' : ''}`}
       aria-labelledby="builder-title"
+      aria-describedby="builder-lead"
       aria-modal={variant === 'drawer' ? true : undefined}
       role={variant === 'drawer' ? 'dialog' : 'region'}
+      onKeyDown={handleDrawerKeyDown}
     >
       <header className="builder-drawer__header">
         <div>
           <span>{variant === 'workspace' ? 'Evidence workspace' : 'Current experiment'}</span>
-          <h2 id="builder-title">
+          <h2
+            id="builder-title"
+            ref={titleRef}
+            tabIndex={variant === 'drawer' ? -1 : undefined}
+          >
             {variant === 'workspace' ? 'Otaniemi network evidence' : 'Choose the network'}
           </h2>
         </div>
@@ -187,7 +280,7 @@ export function ScenarioBuilderDrawer({
           <button
             type="button"
             className="icon-button"
-            onClick={onClose}
+            onClick={closeDrawer}
             aria-label="Close study-area builder"
             disabled={jobActive}
           >
@@ -196,7 +289,7 @@ export function ScenarioBuilderDrawer({
         )}
       </header>
 
-      <p className="builder-lead">
+      <p className="builder-lead" id="builder-lead">
         {variant === 'workspace'
           ? 'Inspect the analyzable frozen Otaniemi evidence or define another bounded Finland study area. A custom build currently stops at base-network preparation.'
           : 'Prepare a reproducible base network for flood and roadworks resilience. This does not replace the open Kallio modal-filter solver.'}

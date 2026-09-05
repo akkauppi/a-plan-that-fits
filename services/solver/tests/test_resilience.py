@@ -497,8 +497,23 @@ def test_ineligible_frontier_returns_specific_graph_finding() -> None:
     )
 
     assert result["status"] == "verified_unsat"
-    assert result["diagnostics"]["finding"] == "unrepairable_access_cut"
-    assert any(event["type"] == "unrepairable_cut" for event in result["iterations"])
+    diagnostics = result["diagnostics"]
+    assert diagnostics["finding"] == "unrepairable_access_cut"
+    assert diagnostics["origin_id"] == "campus"
+    assert diagnostics["origin_label"] == "Campus"
+    assert diagnostics["reachable_node_count"] == 1
+    assert diagnostics["reachable_segment_ids"] == []
+    assert diagnostics["diagnostic_route"]["unavailable_segment_ids"] == ["sa"]
+    assert diagnostics["diagnostic_route"]["feature"]["geometry"]["type"] == (
+        "MultiLineString"
+    )
+
+    unrepairable_event = next(
+        event for event in result["iterations"] if event["type"] == "unrepairable_cut"
+    )
+    assert unrepairable_event["finding"] == "unrepairable_access_cut"
+    assert unrepairable_event["origin_label"] == "Campus"
+    assert unrepairable_event["diagnostic_route"] == diagnostics["diagnostic_route"]
 
 
 def test_timeout_and_cancellation_are_indeterminate_not_unsat() -> None:

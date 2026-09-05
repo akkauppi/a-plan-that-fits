@@ -7,7 +7,7 @@ import threading
 import httpx
 import pytest
 
-from services.solver.api import create_app
+from services.solver.api import _failed_experiment, _ready_experiment, create_app
 
 
 def _events(response) -> list[dict]:
@@ -26,6 +26,76 @@ async def test_health_and_scenario_contract(one_cut_scenario) -> None:
         scenario = (await client.get("/api/scenario")).json()
         assert scenario["snapshot_id"] == "synthetic-v1"
         assert scenario["stats"]["candidate_interventions"] == 1
+
+
+@pytest.mark.asyncio
+async def test_health_reports_each_experiment_without_changing_legacy_readiness(
+    one_cut_scenario,
+) -> None:
+    app = create_app(scenario=one_cut_scenario)
+    app.state.experiment_readiness["resilient_access"] = _ready_experiment(
+        {"id": "otaniemi-access-v1", "snapshot_id": "resilience-test-snapshot"},
+        fallback_scenario_id="otaniemi-access-v1",
+    )
+    app.state.experiment_readiness["service_coverage"] = _ready_experiment(
+        {
+            "id": "service-coverage-otaniemi-tapiola-v1",
+            "snapshot_id": "coverage-test-snapshot",
+        },
+        fallback_scenario_id="service-coverage-otaniemi-tapiola-v1",
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        payload = (await client.get("/api/health")).json()
+
+    assert payload["ready"] is True
+    assert payload["scenario_id"] == "synthetic"
+    assert payload["experiments"] == {
+        "modal_filter": {
+            "status": "ready",
+            "ready": True,
+            "scenario_id": "synthetic",
+            "snapshot_id": "synthetic-v1",
+        },
+        "resilient_access": {
+            "status": "ready",
+            "ready": True,
+            "scenario_id": "otaniemi-access-v1",
+            "snapshot_id": "resilience-test-snapshot",
+        },
+        "service_coverage": {
+            "status": "ready",
+            "ready": True,
+            "scenario_id": "service-coverage-otaniemi-tapiola-v1",
+            "snapshot_id": "coverage-test-snapshot",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_one_failed_experiment_is_visible_without_disabling_the_others(
+    one_cut_scenario,
+) -> None:
+    app = create_app(scenario=one_cut_scenario)
+    app.state.experiment_readiness["resilient_access"] = _ready_experiment(
+        {"id": "otaniemi-access-v1", "snapshot_id": "resilience-test-snapshot"},
+        fallback_scenario_id="otaniemi-access-v1",
+    )
+    app.state.experiment_readiness["service_coverage"] = _failed_experiment(
+        ValueError("coverage evidence is inconsistent")
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        payload = (await client.get("/api/health")).json()
+
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["experiments"]["resilient_access"]["ready"] is True
+    assert payload["experiments"]["service_coverage"] == {
+        "status": "data_error",
+        "ready": False,
+        "error": "ValueError: coverage evidence is inconsistent",
+    }
 
 
 @pytest.mark.asyncio

@@ -877,14 +877,19 @@ def _solve_minimum_assumption_repair(
             _checkpoint(control, "refinement_reachable_segment_scan")
             reachable_segment_ids = sorted(reachable_segment_id_set)
             if not frontier_decision_ids:
+                unrepairable_diagnostics = {
+                    "finding": "unrepairable_access_cut",
+                    "origin_id": origin.id,
+                    "origin_label": origin.label,
+                    "reachable_node_count": len(reachable_nodes),
+                    "reachable_segment_ids": reachable_segment_ids,
+                    "diagnostic_route": diagnostic_route,
+                }
                 record_event(
                     {
                         "iteration": iteration_number,
                         "type": "unrepairable_cut",
-                        "origin_id": origin.id,
-                        "reachable_node_count": len(reachable_nodes),
-                        "reachable_segment_ids": reachable_segment_ids,
-                        "diagnostic_route": diagnostic_route,
+                        **unrepairable_diagnostics,
                     }
                 )
                 return _terminal_repair_result(
@@ -897,11 +902,7 @@ def _solve_minimum_assumption_repair(
                     iterations,
                     selected_decision_ids=sorted(selected_decision_ids),
                     selected_segment_ids=sorted(selected_segment_ids),
-                    diagnostics={
-                        "finding": "unrepairable_access_cut",
-                        "origin_id": origin.id,
-                        "reachable_node_count": len(reachable_nodes),
-                    },
+                    diagnostics=unrepairable_diagnostics,
                     constraint_model=_constraint_model_payload(
                         decision_groups, constraints, request.budget
                     ),

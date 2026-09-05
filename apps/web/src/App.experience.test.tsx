@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
@@ -9,6 +9,10 @@ vi.mock('./components/MapView', () => ({
 
 vi.mock('./components/ResilienceAnalysisMap', () => ({
   ResilienceAnalysisMap: () => <div aria-label="Resilience analytical map">Otaniemi analytical map</div>,
+}))
+
+vi.mock('./components/ServiceCoverageMap', () => ({
+  ServiceCoverageMap: () => <div aria-label="Service coverage analytical map">Otaniemi–Tapiola allocation map</div>,
 }))
 
 const polygon = {
@@ -109,6 +113,29 @@ const resilienceScenario = {
   },
   semantics: {},
   attribution: 'OSM · SYKE · Espoo',
+}
+
+const serviceCoverageScenario = {
+  id: 'otaniemi-tapiola-service-coverage-v1',
+  name: 'Otaniemi–Tapiola service coverage',
+  description: 'Frozen walking-network allocation evidence.',
+  snapshot_id: 'service-coverage-test-v1',
+  snapshot_timestamp: '2026-09-01T00:00:00Z',
+  bbox: [24.79, 60.16, 24.86, 60.21],
+  center: [24.825, 60.185],
+  network: emptyCollection,
+  population_cells: [{
+    id: 'cell-1', label: 'Population cell 1', district: 'Otaniemi', population: 300,
+    centroid: [24.82, 60.18], feature: polygon,
+  }],
+  candidate_sites: [{
+    id: 'site-1', label: 'Reviewed public facility', category: 'Library',
+    point: [24.821, 60.181], eligible: true, capacity_default: 500,
+    capacity_status: 'declared',
+  }],
+  defaults: { site_budget: 1, max_distance_m: 1200, capacity_multiplier: 1, timeout_seconds: 30 },
+  methodology: 'NetworkX distances, Z3 assignment, fresh verification.',
+  attribution: 'Test evidence',
 }
 
 const catalog = {
@@ -225,6 +252,7 @@ function installApiMock(): void {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (url.endsWith('/resilience/scenario')) return json(resilienceScenario)
+    if (url.endsWith('/service-coverage/scenario')) return json(serviceCoverageScenario)
     if (url.endsWith('/scenario')) return json(scenario)
     if (url.endsWith('/scenario-builder/catalog')) return json(catalog)
     if (url.endsWith('/scenario-builder/preflight')) return json(preflight)
@@ -238,49 +266,87 @@ afterEach(() => {
 })
 
 describe('application experience hierarchy', () => {
-  it('makes the Otaniemi resilient-access experiment the initial experience', async () => {
+  it('opens on a neutral experiment index with all studies at equal prominence', async () => {
     installApiMock()
     render(<App />)
 
-    expect(await screen.findByRole('heading', { name: /See what stays reachable/i })).toBeInTheDocument()
-    expect(screen.getByText(/Current experiment · frozen Otaniemi/i)).toBeInTheDocument()
-    expect(screen.getByText('15 representative 500 m cells')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Solve access with 4/i })).toBeInTheDocument()
-    expect(screen.getByLabelText('Resilience analytical map')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Kallio baseline' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Spatial questions become choices, rules and checked routes.' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Geospatial Constraint Lab experiment index' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Open Four Planters/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Open resilient access/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Open service coverage/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'How solvers work' })).toBeInTheDocument()
+    expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('retains the completed Kallio solver as a navigable baseline', async () => {
+  it('keeps default portal pairs when baseline is opened before scenario loading finishes', async () => {
+    let resolveScenario!: (response: Response) => void
+    const pendingScenario = new Promise<Response>((resolve) => {
+      resolveScenario = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/scenario')) return pendingScenario
+      throw new Error(`Unexpected request ${String(input)}`)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('link', { name: /Open Four Planters/i }))
+    expect(screen.getByRole('heading', { name: 'Loading modal-filter placement' })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).has('pairs')).toBe(false)
+
+    await act(async () => {
+      resolveScenario(json(scenario))
+      await pendingScenario
+    })
+
+    expect(await screen.findByRole('button', { name: /Solve with four/i })).toBeEnabled()
+    expect(new URLSearchParams(window.location.search).get('pairs')).toBe('east::west')
+  })
+
+  it('opens either experiment from the shared index and returns to the collection', async () => {
     installApiMock()
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByRole('heading', { name: /See what stays reachable/i })
-    await user.click(screen.getByRole('button', { name: 'Kallio baseline' }))
+    await screen.findByRole('heading', { name: /Spatial questions become choices/i })
+    await user.click(screen.getByRole('link', { name: /Open Four Planters/i }))
 
     expect(await screen.findByRole('button', { name: /Solve with four/i })).toBeInTheDocument()
-    expect(screen.getByText('Frozen Helsinki scenario')).toBeInTheDocument()
+    expect(screen.getByText(/Experiment 01 · frozen Kallio–Vallila/i)).toBeInTheDocument()
     expect(screen.getByLabelText('Baseline map')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Otaniemi experiment' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Experiments' }))
 
-    await user.click(screen.getByRole('button', { name: 'Otaniemi experiment' }))
+    expect(await screen.findByRole('heading', { name: /Spatial questions become choices/i })).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: /Open resilient access/i }))
     expect(await screen.findByRole('heading', { name: /See what stays reachable/i })).toBeInTheDocument()
+    expect(screen.getByText(/Experiment 02 · frozen Otaniemi/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Resilience analytical map')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Decrease continuity budget' }))
+    expect(screen.getByLabelText('3 continuity commitments')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Experiments' }))
+    await user.click(screen.getByRole('link', { name: /Open resilient access/i }))
+    expect(screen.getByLabelText('3 continuity commitments')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Experiments' }))
+    await user.click(screen.getByRole('link', { name: /Open service coverage/i }))
+    expect(await screen.findByRole('heading', { name: 'Equitable service coverage' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Service coverage analytical map')).toBeInTheDocument()
   })
 
-  it('opens the solver comparison guide and returns to the live experiment', async () => {
+  it('opens the shared solver guide from the experiment index and returns', async () => {
     installApiMock()
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByRole('heading', { name: /See what stays reachable/i })
-    await user.click(screen.getByRole('button', { name: 'How solvers differ' }))
+    await screen.findByRole('heading', { name: /Spatial questions become choices/i })
+    await user.click(screen.getByRole('button', { name: 'How solvers work' }))
 
     expect(screen.getByRole('heading', { name: /route finder searches a network/i })).toBeInTheDocument()
-    expect(screen.getByText(/routing tells us whether a proposed network works/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Live experiment' })).toBeInTheDocument()
+    expect(screen.getByText(/network analysis supplies geographic relationships/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Experiments' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Live experiment' }))
-    expect(await screen.findByRole('heading', { name: /See what stays reachable/i })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Experiments' }))
+    expect(await screen.findByRole('heading', { name: /Spatial questions become choices/i })).toBeInTheDocument()
   })
 
   it('restores a shared baseline URL and preserves the experiment when settings change', async () => {
@@ -289,8 +355,28 @@ describe('application experience hierarchy', () => {
     render(<App />)
 
     expect(await screen.findByRole('button', { name: /Solve with 6/i })).toBeInTheDocument()
-    expect(screen.getByText('Frozen Helsinki scenario')).toBeInTheDocument()
+    expect(screen.getByText(/Experiment 01 · frozen Kallio–Vallila/i)).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('experience')).toBe('baseline')
     expect(new URLSearchParams(window.location.search).get('budget')).toBe('6')
+  })
+
+  it('restores a shared resilient-access URL directly', async () => {
+    window.history.replaceState(null, '', '/?experience=resilience')
+    installApiMock()
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: /See what stays reachable/i })).toBeInTheDocument()
+    expect(screen.getByText(/Experiment 02 · frozen Otaniemi/i)).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('experience')).toBe('resilience')
+  })
+
+  it('restores a shared service-coverage URL directly', async () => {
+    window.history.replaceState(null, '', '/?experience=coverage')
+    installApiMock()
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Equitable service coverage' })).toBeInTheDocument()
+    expect(screen.getByText(/Experiment 03 · service location/i)).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('experience')).toBe('coverage')
   })
 })

@@ -1,58 +1,138 @@
-# Four Planters
+# Geospatial Constraint Lab
 
-Four Planters is an interactive urban-network research instrument. It now contains
-two related experiments: the completed Helsinki modal-filter baseline and an
-Otaniemi access-resilience experiment that makes the role of a constraint solver
-visible on a real, frozen geographic network. A presentation-ready **How solvers
-differ** page now explains the division of labour between routing and constraint
-solving for nontechnical colleagues. The primary question is:
+Geospatial Constraint Lab is a collection of interactive research experiments about
+using constraint solving with real geographic networks. Each experiment turns map
+features and policy assumptions into explicit decisions and requirements. Z3 searches
+the permitted combinations; NetworkX tests the resulting network and returns concrete
+counterexamples when a proposal fails. Before a feasible answer is called verified,
+its requested connectivity is repeated on a fresh graph. Verified infeasibility has a
+different certificate: Z3 proves the active hard constraints and accumulated sound
+graph-derived clauses inconsistent, or the graph checker finds a required cut with no
+eligible decision.
 
-> Under an explicit flood/roadworks availability scenario, which minimum
-> corridor-scale continuity commitments let selected origins retain private-car
-> access to at least one reviewed network exit?
+The browser presents three experiments as equal examples of that method:
 
-The retained baseline asks:
+| Experiment | Question | Decision |
+| --- | --- | --- |
+| **Modal-filter placement · Kallio** | Can a small number of filters stop selected private-car through-routes while retaining local access and stated mode assumptions? | Which eligible street segments receive a modal filter? |
+| **Flood-resilient access · Otaniemi** | Under an explicit flood/roadworks availability scenario, which minimum corridor commitments let selected origins retain access to a reviewed network exit? | Which unavailable corridor zones must remain passable? |
+| **Equitable service coverage · Otaniemi–Tapiola** | Which reviewed public-facility sites can host a hypothetical temporary service so every included population cell has one assignment within stated distance and capacity assumptions? | Which sites open, and which site serves each demand cell? |
 
-> Can a small number of modal filters prevent private-car through-routing across a
-> neighbourhood while preserving local access, walking, cycling, public transport,
-> and assumed emergency access?
+No experiment is the product's master case. Together they show how the same
+constraint-and-verification pattern can support different geospatial questions. The
+presentation-ready **How solvers differ** page explains the division of labour
+between routing and constraint solving for colleagues who know GIS but not Z3.
 
-The browser opens the newer Otaniemi experiment first. It combines frozen
-OpenStreetMap, Finnish Environment Institute (Syke), and City of Espoo evidence with
-a React/MapLibre interface and a FastAPI, Z3, and NetworkX
-counterexample-guided solver. The Kallio–Alppiharju–western Vallila planter solver
-remains available from the experiment switcher as a deterministic baseline.
+All three use real, frozen source evidence, a React/MapLibre interface, and a FastAPI,
+Z3, and NetworkX analytical service. Kallio uses OpenStreetMap; flood-resilient
+Otaniemi combines OpenStreetMap, Finnish Environment Institute (Syke), National Land
+Survey of Finland (MML), and City of Espoo evidence. Service coverage combines the
+frozen OSM walking graph with HSY's 2025 population grid and exact Helsinki
+metropolitan Service Map unit records. The service experiment compiles its complete
+finite distance matrix before solving instead of using counterexample refinement.
+
+## Shared vocabulary
+
+- A **scenario assumption** is a declared rule that translates source evidence or a
+  user choice into model state. For example, the Otaniemi stress rule may treat a
+  flood-exposed private-car link as unavailable. It is an input to the experiment,
+  not a finding that the road is actually closed or unsafe.
+- A **decision variable** is a named Boolean choice Z3 may set while satisfying the
+  hard constraints. In Kallio, `blocked[candidate_id]` selects a modal-filter
+  location. In flood-resilient Otaniemi, `passable[group_id]` selects a continuity
+  commitment. In service coverage, `open[site_id]` selects sites and
+  `assign[cell_id, site_id]` gives every included cell exactly one selected site.
+- A **continuity commitment** is one Boolean decision grouping connected exposed OSM
+  fragments using normalized street-name continuity, or OSM way/highway continuity
+  where a fragment is unnamed. Selecting it restores only those grouped fragments
+  removed by the enabled flood-exposure assumption; declared fixed roadworks are
+  excluded from the groups and can never be overridden. The budget counts the
+  Boolean group once, while the result separately reports every expanded physical
+  fragment. A selected group belongs to the returned optimum under this encoded
+  model, but it may be replaceable in an equally good alternative. Selection is
+  never a finding that the corridor is physically safe, legally available,
+  operable, funded, or practically protectable.
+- A **counterexample** is a concrete NetworkX witness that a proposed assignment
+  fails the geographic requirement: for example, a surviving through-route or a
+  stranded origin. Its mapped route explains the failure but is not automatically a
+  solver constraint.
+- A **learned frontier clause** is a necessary logical alternative derived from the
+  directed reachable frontier of a failed proposal, such as
+  `passable[a] OR passable[b]`. Adding that clause prevents Z3 from repeating a whole
+  class of failures; the displayed diagnostic route and the learned clause are
+  deliberately kept distinct. In the modal-filter experiment, the corresponding
+  lesson is a **path-cut clause**: at least one eligible filter on a surviving
+  portal-to-portal route must be selected. Frontier clauses preserve an access path;
+  path-cut clauses break a through-path.
+- An **analytical capacity** is a declared scenario limit used by the assignment
+  model. Experiment 03's value of 5,000 people per candidate is intentionally not a
+  measured occupancy, throughput, staffing level, or Service Map fact. It lets the
+  interface demonstrate budget/capacity conflicts without fabricating operational
+  evidence.
+- **Verified feasible** means the selected assignment satisfied the encoded
+  constraints and a fresh independent verifier repeated the requested graph and
+  arithmetic checks. **Verified UNSAT** means Z3 found no assignment for
+  the active hard constraints plus sound graph-derived necessary clauses; a required
+  graph cut with no eligible decision is reported as a distinct verifier finding.
+  Neither is a forecast about the real city. **Indeterminate** covers timeout,
+  cancellation, and data or verification errors, and is never shown as UNSAT.
+
+The [resilient-access methodology](docs/resilient-access-foundation.md#constraint-solver-and-visual-refinement)
+documents the full counterexample-guided loop, map artefacts, objectives, proof
+boundary, and measured Otaniemi teaching trace. The
+[service-coverage method](docs/service-coverage-foundation.md) explains why the
+third experiment uses a directly encoded assignment matrix, and its
+[evidence note](docs/service-coverage-data-notes.md) records exact source requests,
+hashes, counts, CRS transformations, and privacy limitations.
 
 ## Current status
 
-Both end-to-end vertical slices are implemented. The Otaniemi workspace exposes the
+All three end-to-end vertical slices are implemented. The flood-resilient Otaniemi
+workspace exposes the
 source evidence, availability assumption, representative origins, reviewed network
 exits, corridor-scale decision units, live candidate/counterexample/refinement
 events, and fresh directed-graph verification. It also contains an inspectable
 constraint workbench that translates map facts into Boolean variables and learned
 frontier clauses for an audience familiar with GIS but new to constraint solvers.
 
-The preserved Kallio solver still provides modal-filter locks, forced filters,
+The Kallio modal-filter solver provides locks, forced filters,
 portal-pair editing, alternatives, comparison, timeout/cancellation, explanatory
 UNSAT output, and desktop/tablet layouts. Four is an upper bound, not a required
 count; its audited default scenario uses all four at its verified optimum. See
 [the release handoff](docs/reboot-handoff.md) for its measured baseline evidence.
 
-As of 2026-08-30, Four Planters is a **completed baseline rather than the primary
-continuing research question**. Its engineering assets will be reused, but further
-expansion of portal/filter experiments has diminishing scientific value because the
-result is strongly controlled by boundary, portal, and candidate assumptions and is
-often close to a small graph cut.
+The modal-filter experiment reached a completed research baseline on 2026-08-30.
+Further expansion of that particular portal/filter formulation has diminishing
+scientific value because the result is strongly controlled by boundary, portal, and
+candidate assumptions and is often close to a small graph cut. It nevertheless
+remains a first-class experiment, reproducible demonstration, and regression fixture.
 
-The accepted continuing direction is **resilient access under flooding and planned
-street works**. The first real Otaniemi solver slice is now checked in beside the
-baseline: typed location recipes, fixed-endpoint OSM/MML/Syke/Espoo adapters, frozen
+The flood-resilient-access experiment extends the shared method into flooding and
+planned street works. Its first Otaniemi solver slice includes typed location recipes,
+fixed-endpoint OSM/MML/Syke/Espoo adapters, frozen
 source evidence, a directed walking/cycling/private-car base network, an
 exposure-only coastal-flood overlay, a 2 m terrain-quality-control raster, municipal
 address/building evidence, explicit private-car availability assumptions, and a
 fresh-graph-verified access solver. See the
 [foundation, method, and provenance](docs/resilient-access-foundation.md) and the
 [project decision and roadmap](docs/project-status-and-roadmap.md).
+
+The equitable-service-coverage experiment extends the laboratory from changing a
+network to choosing facilities and assignments over one. Its frozen
+Otaniemi–Tapiola artifact contains 33 published HSY 250 m cells representing 8,554
+included residents, ten reviewed Service Map venues, and all 330 demand/site
+routes. Each stored total includes a straight-line representative-point snap connector,
+the shortest-path length on the frozen OSM walking graph, and a straight-line site
+connector. Z3 jointly selects sites and assigns
+each whole cell under site-budget, maximum-distance, declared-capacity, force, and
+prohibit constraints; a fresh NetworkX check audits both connectors, the exact graph
+edge chain, its shortest-path component, each total, and every load. The
+default at-most-four request is verified optimal with two selected sites. A
+budget-one sensitivity is verified UNSAT because one declared 5,000-person site
+cannot accept 8,554 included people. Capacity is a visible analytical assumption,
+not a source fact or operational claim. Frozen snapshot
+`coverage-4e7e682613eb7d074b8a3341` and its source chain are documented in the
+[service-coverage evidence note](docs/service-coverage-data-notes.md).
 
 A secondary evidence drawer exposes the bounded location-builder workflow: frozen
 Otaniemi or a clickable Finland point/radius canvas with precise coordinate fields,
@@ -79,17 +159,21 @@ Useful commands:
 
 ```bash
 make data          # deterministic rebuild from the checked-in compressed OSM response
+make service-coverage-validate # validate Experiment 03 sources, files, IDs, and routes
 make test          # Python plus frontend unit/lint/type checks
 make build         # production browser build
 make test-e2e      # Playwright desktop and tablet story
 make lint
 ```
 
-Recorded on the 2026-08-31 integration tree: 190 Python tests, 35 Vitest cases, and
-all ten Playwright desktop/tablet stories passed; Ruff, ESLint, strict TypeScript,
+Recorded on the 2026-08-31 integration tree: 191 Python tests, 46 Vitest cases, and
+all twelve Playwright desktop/tablet stories passed; Ruff, ESLint, strict TypeScript,
 the production build, and the frozen-data validators passed. Vite retains the
 documented large MapLibre chunk advisory. See the
 [acceptance evidence](docs/acceptance-checklist.md) for the scoped checklist.
+Experiment 03 subsequently added focused frozen-evidence and tamper-regression tests;
+its combined solver, API, and all-suite counts should be read from the final integration
+run rather than inferred from the historical totals.
 
 The Otaniemi experiment has a complete offline evidence-replay path:
 
@@ -108,6 +192,18 @@ make otaniemi-sources-refresh    # contacts Syke and Espoo WFS
 make otaniemi-elevation-refresh  # reads MML_API_KEY from local .env; contacts MML WCS
 ```
 
+The Otaniemi–Tapiola service-coverage slice also has an offline deterministic replay:
+
+```bash
+make service-coverage           # rebuild from committed HSY, Service Map, and OSM evidence
+make service-coverage-validate  # validate source/published hashes, IDs, matrix, and 330 routes
+make service-coverage-test      # frozen-evidence, connector, and tamper-regression checks
+```
+
+Only `make service-coverage-refresh` contacts HSY WFS and the ten exact Service Map
+unit endpoints. It updates the source manifest and creates a new content-derived
+snapshot; it is never run by startup, solving, tests, or the offline targets.
+
 Normal startup, solving, `make data`, and every non-refresh Otaniemi command remain
 offline. Copy `.env.example` to the Git-ignored `.env` and set the key only when an
 explicit MML refresh is intended; credentials are neither needed nor read during
@@ -123,7 +219,7 @@ make data-refresh
 That command contacts Overpass, archives the raw bounded response with a checksum,
 and replaces the derived snapshot. Normal startup and `make data` remain offline.
 
-## Completed Four Planters reference scenario
+## Experiment · Modal-filter placement in Kallio
 
 - Study polygon/bbox (WGS84): `[24.9435, 60.1854, 24.9635, 60.1962]`
 - Approximate area: 1.33 km²
@@ -163,9 +259,9 @@ Attribution is permanently visible in the map and instrument footer. Detailed qu
 checksum, policies, versions, and validation results are in
 [`metadata.json`](data/derived/helsinki-kallio-vallila/metadata.json).
 
-## Otaniemi resilient-access experiment
+## Experiment · Flood-resilient access in Otaniemi
 
-The successor pilot uses a 2.743279 km² coastal core in Otaniemi, Espoo with a
+This experiment uses a 2.743279 km² coastal core in Otaniemi, Espoo with a
 separate 750 m network/source context. The frozen OpenStreetMap observation has base
 timestamp `2026-08-30T09:57:36Z`; derived snapshot
 `base-c8dcbcfaca2b2c9498420681` contains 18,710 nodes, 42,077 directed edges, and
@@ -247,6 +343,57 @@ still flattens `access=destination` and `access=delivery` to “permitted” on 
 otherwise eligible way. Those purpose restrictions must be contextualized as local
 versus through movement before the graph supports an operational access conclusion.
 
+## Experiment · Equitable service coverage in Otaniemi–Tapiola
+
+The third experiment uses the WGS84 study polygon recorded in
+[`service-coverage-otaniemi-tapiola-v1.json`](data/recipes/service-coverage-otaniemi-tapiola-v1.json),
+with bbox `[24.802, 60.172, 24.8425, 60.1912]`. Frozen snapshot
+`coverage-4e7e682613eb7d074b8a3341` has observation timestamp
+`2026-09-01T10:10:33.425Z` and combines:
+
+- 33 published 2025 HSY 250 m population cells, totalling 8,554 included residents;
+- ten individually archived, reviewed Helsinki metropolitan Service Map units;
+- OSM walking-network snapshot `base-c8dcbcfaca2b2c9498420681`;
+- 330 deterministic, connector-inclusive demand/site distances and mapped routes; and
+- a compact verification graph with 3,207 nodes and 4,426 directed edges.
+
+HSY's source response was timestamped `2026-09-01T09:18:48.333Z`; every
+population feature reports source update `2026-08-05Z`. The Service Map records
+were acquired from their exact unit endpoints on 1 September 2026. HSY and Service
+Map are CC BY 4.0; OSM is ODbL 1.0. Exact endpoints, query parameters, byte sizes,
+SHA-256 values, CRS handling, site IDs, and suppression cautions are in the
+[`source-manifest.json`](data/source/service-coverage/otaniemi-tapiola-v1/source-manifest.json)
+and [evidence note](docs/service-coverage-data-notes.md).
+
+Every candidate receives the same declared 5,000-person assignment bound. That
+number is a scenario input for explaining capacity constraints—not a facility
+occupancy, current service capacity, staffing estimate, or source attribute. Each
+published grid cell is indivisible in this first model and is represented by one
+snapped interior point. Privacy-suppressed demand is not imputed.
+
+With at most four sites, a 1,600 m connector-inclusive walking-distance limit,
+multiplier 1.0, and a
+30-second deadline, the recorded default is verified optimal with two selected
+sites, Haukilahden lukio and Tapiolan nuorisotila. Those names are a reproducibility
+observation, not a recommendation. All 33 assignments were checked against the
+compact walking graph and both analytical snap connectors; the worst route is 1,231.82 m
+and the population-weighted mean is 757.83 m. With a site budget of one, Z3 returns
+verified UNSAT: maximum
+declared capacity is 5,000 against 8,554 included people. A 1,000 m sensitivity
+instead exposes a mapped geographic coverage gap. Timeout remains indeterminate in
+both cases.
+
+The strongest permitted claim is:
+
+> Under the frozen demand, candidate-site, walking-network, snap-connector, distance, declared
+> capacity, and budget assumptions, every included published population cell has
+> exactly one verified assignment to a selected site.
+
+It is not an equity finding or service plan. It does not establish complete
+population, household-level accessibility, real service demand, facility
+availability, accessible entrances, opening hours, queues, staffing, legal use, or
+operational capacity.
+
 ## Solver method
 
 The Otaniemi experiment separates geographic evidence, a deliberately chosen
@@ -261,8 +408,9 @@ Z3 begins with the budget and any graph-derived clauses learned so far; reachabi
 is not naïvely encoded as every possible path. NetworkX acts as a domain verifier:
 
 1. Z3 proposes which continuity-zone variables are true.
-2. NetworkX applies fixed works and the explicit flood stress rule, then reintroduces
-   only the physical segments belonging to selected zones.
+2. NetworkX applies fixed works and the explicit flood stress rule, then restores
+   only selected fragments removed by the flood assumption. Fixed roadworks remain
+   unavailable and are never restored by a continuity variable.
 3. If an origin is stranded, NetworkX draws a least-disrupted diagnostic route for
    the map and calculates the directed reachable frontier of eligible zones.
 4. The frontier becomes a necessary clause such as
@@ -279,7 +427,7 @@ Z3 outperforms a shortest-path or cut algorithm on this instance; the solver bec
 more consequential with alternative multi-zone frontiers, cross-scenario budgets,
 and roadworks scheduling.
 
-The completed Kallio baseline uses the same pattern for a different decision. Each
+The Kallio modal-filter experiment uses the same pattern for a different decision. Each
 eligible physical street segment outside both analytical setback zones has a Boolean
 `blocked[candidate_id]`. Z3 enforces the intervention budget, forced filters,
 open-street locks, discovered path cuts, access corrections, and explicit
@@ -301,19 +449,33 @@ estimate and may count one cluster against several candidates. Exact directed
 shortest-path detours are recomputed on the final filtered graph and reported as
 post-solution verification metrics.
 
+Service coverage intentionally uses a different division of labour. NetworkX first
+compiles the complete 33 × 10 walking-distance relation. Z3 then assigns Boolean
+`open[site]` and `assign[cell,site]` variables with exactly-one, implication,
+distance, capacity, budget, force, and prohibit constraints. It minimizes site
+count, worst distance, population-weighted distance, and selected-site load
+imbalance lexicographically. Because the bounded matrix is complete, this slice does
+not use counterexample-guided path discovery. A fresh verifier nevertheless checks
+every chosen graph route, site load, eligibility rule, and budget before returning
+`verified_optimal`. This distinction is part of the lesson: constraint solving does
+not require CEGIS when GIS can compile the relevant finite relationship directly.
+
 Timeout, cancellation, solver UNSAT, graph-unblockable routes, and verification/data
-errors are separate machine-readable states. Equal-objective alternatives are
-enumerated by fixing the objective vector and excluding earlier structural sets.
+errors are separate machine-readable states. The Kallio API enumerates equal-objective
+alternatives by fixing the objective vector and excluding earlier structural sets.
+Experiment 03's solver core has the corresponding enumeration primitive, but its v1
+browser and API do not yet expose a “next solution” workflow.
 Tracked assumptions are translated into human-facing UNSAT explanations and suggested
 relaxations; assumptions are never changed automatically.
 
 See [architecture and proof boundary](docs/architecture.md), [API](docs/api.md), and
 the [acceptance checklist](docs/acceptance-checklist.md). The project conclusion and
-successor plan are in the [status and roadmap](docs/project-status-and-roadmap.md).
+research history and next steps are in the
+[status and roadmap](docs/project-status-and-roadmap.md).
 
 ## Interface
 
-The primary offline MapLibre canvas renders the Otaniemi core and context, actual
+The Otaniemi MapLibre canvas renders the core and context, actual
 street hierarchy and municipal buildings, clipped flood-intersection geometry,
 effective unavailable private-car links, 15 representative origin cells, four
 reviewed exits, diagnostic counterexample routes, selected continuity zones, and the
@@ -332,11 +494,20 @@ operation. It contrasts a route solver's fixed-network question with Z3's
 many-combinations question, diagrams their counterexample-guided hand-off, narrates
 the measured Otaniemi teaching trace, and states the proof boundary in plain language.
 
-The preserved Kallio map renders the study boundary, real street hierarchy and
+The Kallio modal-filter map renders the study boundary, real street hierarchy and
 buildings, protected transit/major-road corridors, eight numbered primary portals,
 address clusters, oriented cross-street candidate symbols, live counterexample
 routes, selected/forced/locked filters, local access routes, and before/after
 directed strong-connectivity regions (mutual private-car reachability).
+
+The service-coverage canvas renders the actual walking graph, HSY grid polygons
+weighted by included population, ten reviewed facilities, assignment routes,
+selected-site load/capacity state, and the worst-distance or uncovered-cell witness.
+Its instrument exposes site budget, distance, declared-capacity multiplier,
+force/prohibit controls, real solver stages, reset/cancel, and distinct
+optimal/UNSAT/indeterminate summaries. The map is the principal result: a user can
+inspect which whole cells are assigned where and see the network route behind the
+reported distance, including the two straight-line snap connectors.
 
 The instrument includes a default budget of four, portal-pair selection, force/open
 street constraints, emergency-permeability assumption, real SSE proof activity,
@@ -347,6 +518,23 @@ the browser default and the selected value is included in the shareable URL. Rea
 that limit is reported as indeterminate/timeout, never as UNSAT.
 
 ## Scientific scope and limitations
+
+The strongest service-coverage claim is:
+
+> Under the frozen demand, candidate-site, walking-network, snap-connector, distance, declared
+> capacity, and budget assumptions, every included published population cell has
+> exactly one verified assignment to a selected site.
+
+It does not establish that the HSY count is current service demand, that a grid-cell
+representative describes every resident's walk, or that a Service Map venue is
+available, accessible, suitable, staffed, legally usable, or able to serve the
+declared load. The 5,000-person limit is an analytical capacity, not a source fact.
+The words “equitable service coverage” name the research question; the current
+distance-and-load objectives are not a policy definition or finding of equity.
+The connector segments join each published representative point and Service Map
+coordinate to its nearest graph node as projected straight lines. They are an explicit
+analytical approximation, not evidence of an entrance, footpath, crossing, or
+universally accessible connection.
 
 The strongest Otaniemi claim is:
 
@@ -360,8 +548,10 @@ open or protectable, that a gateway is safe, that an OSM service road is publicl
 legally usable, or that 297 individual addresses retain access. It does not model
 flood hydraulics, water depth at carriageway elevation, capacity, travel time,
 traffic redistribution, emergency response, or operational feasibility. A selected
-continuity commitment is a minimum dependency of this abstraction, not a proposed
-project.
+continuity commitment belongs only to the returned optimum under this encoded graph
+and its assumptions; it may be replaceable in an equally good alternative. It is not
+a proposed project or a finding that the expanded fragments are safe, legal,
+operable, protectable, or funded.
 
 The strongest intended claim for the Kallio baseline remains:
 
@@ -399,19 +589,28 @@ scripts/build_scenario.py
 scripts/build_base_network.py
 scripts/acquire_scenario_sources.py
 scripts/build_flood_exposure.py
-data/source/            frozen compressed Overpass response and descriptor
-data/recipes/           versioned resilient-access build recipes
-data/derived/           legacy scenario plus immutable Otaniemi snapshots
+scripts/build_service_coverage_scenario.py
+                        offline-by-default service evidence compiler/validator
+data/source/            frozen OSM, HSY, Service Map, Syke, MML and Espoo evidence
+data/recipes/           versioned resilient-access and service-coverage recipes
+data/derived/           immutable Kallio, Otaniemi and Otaniemi–Tapiola snapshots
 docs/                   method, API, acceptance and reboot notes
 ```
 
 ## Release screenshot set
 
-The committed desktop/tablet review artefacts include the primary resilience story,
-its solver explanation, the location/evidence workflow, and the preserved baseline:
+The committed review artefacts cover the shared experiment index, vocabulary, all
+three experiments, their solver explanations, and the location/evidence workflow.
+Earlier experiment screenshots retain the historical `four-planters-*`
+prefix to avoid breaking existing references:
 
 | State | Desktop | Tablet |
 | --- | --- | --- |
+| Shared experiment index | [desktop](docs/screenshots/geospatial-constraint-lab-overview-desktop.png) | [tablet](docs/screenshots/geospatial-constraint-lab-overview-tablet.png) |
+| Shared model vocabulary | [desktop](docs/screenshots/geospatial-constraint-lab-concepts-desktop.png) | [tablet](docs/screenshots/geospatial-constraint-lab-concepts-tablet.png) |
+| Service coverage before solving | [desktop](docs/screenshots/geospatial-constraint-lab-service-coverage-before-desktop.png) | [tablet](docs/screenshots/geospatial-constraint-lab-service-coverage-before-tablet.png) |
+| Service coverage verified result | [desktop](docs/screenshots/geospatial-constraint-lab-service-coverage-verified-desktop.png) | [tablet](docs/screenshots/geospatial-constraint-lab-service-coverage-verified-tablet.png) |
+| Service coverage infeasible sensitivity | [desktop](docs/screenshots/geospatial-constraint-lab-service-coverage-unsat-desktop.png) | [tablet](docs/screenshots/geospatial-constraint-lab-service-coverage-unsat-tablet.png) |
 | Otaniemi before solving | [desktop](docs/screenshots/four-planters-resilience-before-desktop.png) | [tablet](docs/screenshots/four-planters-resilience-before-tablet.png) |
 | Otaniemi graph refinement | [desktop](docs/screenshots/four-planters-resilience-refinement-desktop.png) | [tablet](docs/screenshots/four-planters-resilience-refinement-tablet.png) |
 | Otaniemi verified result | [desktop](docs/screenshots/four-planters-resilience-verified-desktop.png) | [tablet](docs/screenshots/four-planters-resilience-verified-tablet.png) |

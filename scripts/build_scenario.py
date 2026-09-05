@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the frozen Four Planters Kallio--Vallila OSM scenario.
+"""Build the frozen Kallio--Vallila modal-filter experiment scenario.
 
 The default command rebuilds the derived files from the checked-in, compressed
 Overpass response.  Pass ``--refresh`` to acquire a newer bounded response, or
@@ -157,7 +157,7 @@ def fetch_overpass() -> bytes:
         headers={
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "FourPlanters/0.1 reproducible-research-scenario",
+            "User-Agent": "Geospatial-Constraint-Lab/0.1 reproducible-research-scenario",
         },
     )
     with urllib.request.urlopen(request, timeout=180) as response:  # noqa: S310

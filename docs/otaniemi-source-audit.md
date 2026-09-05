@@ -9,8 +9,8 @@
 
 ## Recommendation
 
-Use the polygon below as the first **analysis core** for the resilient-access
-successor. It is small enough for rapid graph iteration, but it contains measurable
+Use the polygon below as the first **analysis core** for the flood-resilient-access
+experiment. It is small enough for rapid graph iteration, but it contains measurable
 coastal-flood exposure and extends north and east into less exposed network context.
 Do not use its boundary as a proxy for safety. Build routes in a buffered context
 graph and require explicitly selected destinations.
@@ -25,8 +25,8 @@ The bounded prototype recommended by this audit was implemented later on the sam
 date. Versioned recipes now freeze the polygon and a distinct 750 m context; real
 OSM, MML, Syke, and Espoo observations are archived with checksums; the OSM network,
 MML terrain window, and Syke segment-exposure overlay are reproducible offline. The
-browser now opens this Otaniemi research workspace before the preserved Kallio
-planter baseline. See the
+browser now presents this Otaniemi research workspace alongside the Kallio
+modal-filter experiment. See the
 [foundation architecture and provenance](resilient-access-foundation.md) for the
 actual schemas, commands, snapshot identities, feature counts, and proof boundary.
 

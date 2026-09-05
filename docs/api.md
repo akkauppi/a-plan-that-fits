@@ -5,7 +5,47 @@ analytical graph is frozen with the scenario and may use a projected metric CRS.
 
 ## `GET /api/health`
 
-Returns service state and the loaded snapshot identifier.
+Returns the legacy top-level service state and Kallio snapshot identifier. The
+top-level `ready` field retains its original meaning—whether the modal-filter
+scenario is available—so existing clients remain compatible.
+
+The additive `experiments` object reports the three runtimes independently:
+
+```json
+{
+  "status": "ok",
+  "ready": true,
+  "service": "geospatial-constraint-lab",
+  "scenario_id": "helsinki-kallio-vallila",
+  "snapshot_id": "…",
+  "experiments": {
+    "modal_filter": {
+      "status": "ready",
+      "ready": true,
+      "scenario_id": "helsinki-kallio-vallila",
+      "snapshot_id": "…"
+    },
+    "resilient_access": {
+      "status": "ready",
+      "ready": true,
+      "scenario_id": "otaniemi-access-v1",
+      "snapshot_id": "…"
+    },
+    "service_coverage": {
+      "status": "ready",
+      "ready": true,
+      "scenario_id": "service-coverage-otaniemi-tapiola-v1",
+      "snapshot_id": "coverage-4e7e682613eb7d074b8a3341"
+    }
+  }
+}
+```
+
+Normal server startup validates and warms each frozen experiment before reporting
+it as ready. A failed optional experiment reports `status: "data_error"`,
+`ready: false`, and an error string in its own entry without disabling a healthy
+experiment. Before lifespan validation, an entry may say `not_checked`; this is
+never presented as ready.
 
 ## `GET /api/scenario`
 
@@ -153,8 +193,12 @@ Accepts:
 false, source exposure remains visible evidence but creates no flood decision
 variables or unavailable links. `roadworks_segment_ids` are exact private-car
 physical links treated as fixed unavailable; they are removed from eligible
-continuity groups. The budget counts grouped continuity commitments, not expanded
-OSM fragments. The API accepts budgets 0–16 and deadlines 1–120 seconds. That
+continuity groups and no solver choice can restore them. Each continuity commitment
+is one Boolean `passable[group_id]` grouping connected exposed fragments by normalized
+street name, or by OSM way/highway continuity when unnamed. Selecting one restores
+only its flood-assumption removals. The budget counts that group once; the result
+separately expands it to exact OSM physical-fragment IDs. The API accepts budgets
+0–16 and deadlines 1–120 seconds. That
 deadline spans initial disruption analysis, graph construction and route searches,
 every Z3 check, refinement, and fresh verification.
 
@@ -172,7 +216,10 @@ The public event's `route`/`witness_segment_ids` are diagnostic visual evidence.
 sound learned constraint is represented separately by `frontier_decision_ids`,
 `learned_clause_ids`, and `constraint_expression`. For example, a frontier becomes
 `passable[zone_a] ∨ passable[zone_b]`; the diagnostic route is not inserted into
-Z3 as a path clause.
+Z3 as a path clause. This access-frontier clause requires at least one alternative
+to preserve a connection. By contrast, the modal-filter solver learns a path-cut
+clause over `blocked[...]` candidates on a surviving portal route, requiring at
+least one choice to sever that prohibited connection.
 
 A verified-optimal result includes grouped and expanded selections, the explicit
 objective values, the baseline and post-commitment access analyses, mapped routes and
@@ -180,7 +227,9 @@ detours, the learned constraint model, iteration count/time, and
 `verification.method: "fresh_networkx_directed_graph"`. The default teaching result
 is three groups, 21 expanded fragments, aggregation-length cost 388, and +1,093 m
 mapped detour. These are model outputs, not project cost, road safety, capacity, or
-legal-access findings.
+legal-access findings. A selected group belongs to the returned optimum only in the
+encoded model and may be replaceable in an equally good alternative; it does not
+establish physical safety, legal availability, operability, protection, or funding.
 
 A verified-UNSAT result means no assignment within the encoded continuity-group
 budget satisfies all learned necessary access-frontier clauses, or that a stranded
@@ -192,12 +241,139 @@ Accepts `{ "solve_id": "…" }`. Cancellation is cooperative across Z3 and graph
 boundaries and returns HTTP 202 when the live solve ID is known. A cancelled stream
 terminates as `cancelled`, never `verified_unsat`.
 
+## Otaniemi–Tapiola equitable service-coverage API
+
+These endpoints operate on frozen scenario
+`service-coverage-otaniemi-tapiola-v1`, snapshot
+`coverage-4e7e682613eb7d074b8a3341`. The checked solver artifact contains 33
+published HSY population cells representing 8,554 residents, ten reviewed Service
+Map facilities, 330 connector-inclusive walking-distance relations, and a compact 3,207-node / 4,426-edge
+directed walking graph. The browser payload is stored separately from the solver
+graph and matrix.
+
+Facility identity and location come from Service Map, but the current
+5,000-person capacity attached to every candidate is an **analyst-declared
+sensitivity value**. It is not source data, observed throughput, room capacity,
+staffing, accessibility, availability, or a recommendation to use that facility.
+
+### `GET /api/service-coverage/scenario`
+
+Returns the immutable browser payload: study bounds, frozen walking-network
+linework, HSY cell polygons and representative points, reviewed candidate sites,
+defaults, source attribution, methodology text, and snapshot identity. It does not
+return a live service-area query and makes no source request at runtime.
+
+### `POST /api/service-coverage/solve`
+
+Accepts:
+
+```json
+{
+  "scenario_id": "service-coverage-otaniemi-tapiola-v1",
+  "site_budget": 4,
+  "max_distance_m": 1600,
+  "capacity_multiplier": 1,
+  "forced_site_ids": [],
+  "banned_site_ids": [],
+  "timeout_seconds": 30
+}
+```
+
+`site_budget` is an upper bound on active sites. `max_distance_m` is compared with
+the frozen total `demand_connector_m + network_distance_m + site_connector_m`, not
+with the graph component alone, a pure Euclidean point-to-point distance, or travel
+time. `network_distance_m` is a directed shortest-path length. The two snap
+connectors are projected straight-line approximations between source coordinates
+and graph nodes; they are not sourced entrances or accessibility evidence. Each
+included population cell is indivisible and must be assigned to exactly
+one active, eligible site. A forced site must be active; a banned site must be
+inactive. Duplicate IDs, an ID in both lists, or an unknown scenario are rejected
+or returned as scoped data errors rather than silently repaired.
+
+The effective capacity is:
+
+```text
+floor(analyst_declared_capacity[site] * capacity_multiplier)
+```
+
+The API accepts budgets 0–32, distance limits 100–5,000 m, capacity multipliers
+0.1–4.0, and deadlines 0.01–120 seconds. The checked browser defaults are four
+sites, 1,600 m, 1.0× capacity, and 30 seconds.
+
+The response is `text/event-stream`. It exposes the real direct-solve phases:
+
+- `started`: the API has accepted the request and loaded frozen evidence;
+- `matrix_compiled`: Boolean `open[site]` and `assign[cell,site]` variables and
+  named hard constraints have been constructed;
+- `feasible_assignment`: Z3 has found a witness satisfying every active hard
+  constraint, but optimality and fresh verification are not yet claimed;
+- `objective_improved`: one lexicographic objective value has been proved and a
+  map-ready current assignment is included;
+- `fresh_verification`: the selected assignment has passed the independent
+  matrix, graph, capacity, eligibility, force/ban, budget, and objective checks;
+- `unsat_core`: tracked assumptions are inconsistent and the event carries the
+  translated core and, where applicable, a demand-cell witness;
+- `verified_optimal`, `verified_unsat`, `timeout`, `cancelled`, or `data_error`:
+  the terminal event, whose `result` contains the complete result object.
+
+Unlike the Kallio endpoint, the service-coverage terminal event is named directly
+after its result state rather than `complete`. Callers should use `result.status`
+as the authoritative terminal state in either convention. Intermediate feasible
+assignments must never be displayed as final answers.
+
+The four objective priorities are explicit and lexicographic:
+
+1. selected-site count;
+2. worst assigned walking distance;
+3. population-weighted total assigned distance;
+4. the population-load spread between the most and least loaded selected sites.
+
+The compatibility field `objective_values.population_weighted_distance_m` contains
+the weighted **total** in person-metres. The unambiguous aliases
+`population_weighted_total_distance_person_m` and
+`population_weighted_mean_distance_m` are returned alongside it. A later objective
+can never compensate for a worse earlier objective.
+
+A verified-optimal result contains:
+
+- `selected_site_ids` and one `assignment` for every included cell;
+- the cell and site IDs, cell population, connector-inclusive total distance, its
+  demand/network/site component distances, and frozen route GeoJSON for each
+  assignment;
+- declared/effective capacity, assigned population, assigned-cell count, and
+  utilisation for every site;
+- both the exact integer `objective_vector` and human-unit `objective_values`;
+- independent-verification booleans and detailed connector, node/edge-chain,
+  shortest-path, geometry, component-sum, and graph checks;
+- district summaries for inspection only—version 1 has no district hard rule;
+- the named `constraint_model`, request assumptions, event history, timing, and
+  snapshot IDs.
+
+`verified_unsat` means the tracked exact-assignment, distance, site-budget,
+capacity, force, and ban constraints have no joint assignment. Diagnostics
+distinguish cases such as an uncovered demand cell and insufficient declared
+capacity under the budget, and suggest explicit relaxations. A 30-second timeout
+means the optimality or feasibility proof did not finish; it makes no infeasibility
+claim. A disagreement between Z3 output, the frozen matrix, and fresh NetworkX
+verification is `data_error`, not a partially verified solution.
+
+The core supports excluding an earlier selected-site set while fixing the complete
+objective vector, but equal-objective alternative enumeration is not yet a public
+Experiment 03 endpoint.
+
+### `POST /api/service-coverage/solve/cancel`
+
+Accepts `{ "solve_id": "…" }`. Cancellation is cooperative during Z3 and fresh
+NetworkX verification and returns HTTP 202 for a known active solve. The terminal
+state is `cancelled`, never `verified_unsat`; an unknown or completed ID returns
+HTTP 404.
+
 ## Resilient-access scenario-builder API
 
 These endpoints publish verified **base-network artifacts** beside the two loaded
-scenarios. The browser presents the Otaniemi workspace first, but these endpoints do
-not change the preserved Kallio solver or the frozen Otaniemi resilience runtime,
-derive flood availability, review origins/exits, or claim safe access.
+scenarios. They do not change either the Kallio modal-filter solver or the frozen
+Otaniemi resilience runtime, derive flood availability, review origins/exits, or
+claim safe access.
 
 ### `GET /api/scenario-builder/catalog`
 

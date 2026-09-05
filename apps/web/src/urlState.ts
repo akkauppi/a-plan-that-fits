@@ -1,6 +1,6 @@
 import type { ScenarioSettings } from './types'
 
-export type Experience = 'resilience' | 'baseline'
+export type Experience = 'overview' | 'resilience' | 'coverage' | 'baseline'
 
 const safeIds = (value: string | null): string[] =>
   value?.split(',').map(decodeURIComponent).filter(Boolean).slice(0, 100) ?? []
@@ -26,19 +26,26 @@ export function settingsFromUrl(fallback: ScenarioSettings, search = window.loca
 }
 
 export function experienceFromUrl(search = window.location.search): Experience {
-  return new URLSearchParams(search).get('experience') === 'baseline' ? 'baseline' : 'resilience'
+  const experience = new URLSearchParams(search).get('experience')
+  if (experience === 'baseline' || experience === 'resilience' || experience === 'coverage') return experience
+  return 'overview'
 }
 
 export function settingsToSearch(
   settings: ScenarioSettings,
-  experience: Experience = 'resilience',
+  experience: Experience = 'baseline',
 ): string {
+  if (experience === 'overview') return ''
+  if (experience === 'resilience') return '?experience=resilience'
+  if (experience === 'coverage') return '?experience=coverage'
   const params = new URLSearchParams()
-  if (experience === 'baseline') params.set('experience', 'baseline')
+  params.set('experience', 'baseline')
   if (settings.budget !== 4) params.set('budget', String(settings.budget))
-  params.set('pairs', settings.selectedPairKeys.map(encodeURIComponent).join(','))
-  if (settings.forced.length) params.set('force', settings.forced.map(encodeURIComponent).join(','))
-  if (settings.locked.length) params.set('open', settings.locked.map(encodeURIComponent).join(','))
+  // URLSearchParams performs the percent-encoding. Encoding each identifier first
+  // would leave `%3A`-style fragments visible after a normal query-string decode.
+  params.set('pairs', settings.selectedPairKeys.join(','))
+  if (settings.forced.length) params.set('force', settings.forced.join(','))
+  if (settings.locked.length) params.set('open', settings.locked.join(','))
   if (!settings.emergencyPermeable) params.set('emergency', 'fixed')
   if (settings.objectiveMode !== 'balanced') params.set('objective', settings.objectiveMode)
   if (settings.timeoutSeconds !== 30) params.set('timeout', String(settings.timeoutSeconds))
@@ -48,7 +55,7 @@ export function settingsToSearch(
 
 export function replaceSettingsUrl(
   settings: ScenarioSettings,
-  experience: Experience = 'resilience',
+  experience: Experience = 'baseline',
 ): void {
   const url = new URL(window.location.href)
   url.search = settingsToSearch(settings, experience)

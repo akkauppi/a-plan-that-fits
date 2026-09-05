@@ -6,7 +6,7 @@ import type { Candidate, Scenario, SolveResult } from '../types'
 
 const BLANK_STYLE: StyleSpecification = {
   version: 8,
-  name: 'Four Planters analytical canvas',
+  name: 'Modal-filter placement analytical canvas',
   sources: {},
   layers: [{ id: 'paper', type: 'background', paint: { 'background-color': '#f3f0e9' } }],
 }
@@ -416,7 +416,7 @@ export function MapView({
       attributionControl: false,
     })
     mapRef.current = map
-    if (import.meta.env.DEV) window.__FOUR_PLANTERS_MAP__ = map
+    if (import.meta.env.DEV) window.__GEOSPATIAL_LAB_MAP__ = map
     map.addControl(new maplibregl.NavigationControl({ showCompass: false, visualizePitch: false }), 'top-right')
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric', maxWidth: 100 }), 'bottom-right')
     map.addControl(
@@ -449,7 +449,7 @@ export function MapView({
       portalMarkersRef.current = []
       map.remove()
       mapRef.current = undefined
-      if (import.meta.env.DEV) window.__FOUR_PLANTERS_MAP__ = undefined
+      if (import.meta.env.DEV) window.__GEOSPATIAL_LAB_MAP__ = undefined
       setLoaded(false)
     }
   }, [scenario])

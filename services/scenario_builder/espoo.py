@@ -240,7 +240,7 @@ def _default_transport(url: str, timeout_s: int) -> bytes:
         method="GET",
         headers={
             "Accept": "application/gml+xml, application/xml, text/xml",
-            "User-Agent": "Four-Planters-Scenario-Builder/1.0",
+            "User-Agent": "Geospatial-Constraint-Lab-Scenario-Builder/1.0",
         },
     )
     with urllib.request.urlopen(request, timeout=timeout_s) as response:

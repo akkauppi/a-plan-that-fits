@@ -309,7 +309,7 @@ def _default_transport(query: str, timeout_s: int) -> bytes:
         headers={
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-            "User-Agent": "Four-Planters-Scenario-Builder/1.0",
+            "User-Agent": "Geospatial-Constraint-Lab-Scenario-Builder/1.0",
         },
     )
     with urllib.request.urlopen(request, timeout=timeout_s + 15) as response:

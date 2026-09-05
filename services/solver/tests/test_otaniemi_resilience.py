@@ -525,6 +525,95 @@ async def test_resilience_sse_stream_exposes_candidates_witnesses_clauses_and_re
     assert terminal["result"]["solve_id"] == solve_id
 
 
+class _UnrepairableResilienceService:
+    def scenario_payload(self) -> dict[str, Any]:
+        return {"id": "otaniemi-access-v1", "snapshot_id": "frozen-test"}
+
+    def solve(
+        self,
+        *,
+        cancel_event: threading.Event,
+        on_event: Callable[[dict[str, Any]], None],
+        **_settings: Any,
+    ) -> dict[str, Any]:
+        assert not cancel_event.is_set()
+        diagnostic_route = {
+            "unavailable_segment_ids": ["fixed-roadworks-link"],
+            "purpose": "Diagnostic least-disrupted baseline route.",
+            "feature": {
+                "type": "Feature",
+                "properties": {"role": "diagnostic_witness"},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[24.8, 60.1], [24.9, 60.2]],
+                },
+            },
+        }
+        finding = {
+            "finding": "unrepairable_access_cut",
+            "origin_id": "origin-a",
+            "origin_label": "Otaranta",
+            "reachable_node_count": 7,
+            "reachable_segment_ids": ["reachable-link"],
+            "diagnostic_route": diagnostic_route,
+        }
+        on_event({"type": "unrepairable_cut", "iteration": 1, **finding})
+        return {
+            "status": "verified_unsat",
+            "verified": True,
+            "message": "Otaranta has no eligible continuity zone on its directed cut.",
+            "selected_decision_ids": [],
+            "selected_segment_ids": [],
+            "diagnostics": finding,
+        }
+
+
+@pytest.mark.asyncio
+async def test_resilience_sse_maps_unrepairable_cut_route_and_finding(
+    one_cut_scenario,
+) -> None:
+    app = create_app(
+        scenario=one_cut_scenario,
+        resilience_service=_UnrepairableResilienceService(),  # type: ignore[arg-type]
+    )
+    transport = httpx.ASGITransport(app=app)
+    request = {
+        "scenario_id": "otaniemi-access-v1",
+        "flood_return_period_years": 1000,
+        "treat_flood_exposure_as_unavailable": True,
+        "roadworks_segment_ids": ["fixed-roadworks-link"],
+        "origin_ids": ["origin-a"],
+        "gateway_group_ids": ["gateway-east-kuusisaarentie"],
+        "analytical_repair_budget": 4,
+        "timeout_seconds": 30,
+    }
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/resilience/solve", json=request)
+
+    assert response.status_code == 200
+    events = _sse_events(response)
+    assert [event["type"] for event in events] == [
+        "started",
+        "counterexample_found",
+        "verified_unsat",
+    ]
+    counterexample = events[1]
+    assert counterexample["finding"] == "unrepairable_access_cut"
+    assert counterexample["origin_id"] == "origin-a"
+    assert counterexample["origin_label"] == "Otaranta"
+    assert counterexample["reachable_node_count"] == 7
+    assert counterexample["reachable_segment_ids"] == ["reachable-link"]
+    assert counterexample["route"]["geometry"]["type"] == "LineString"
+    assert counterexample["witness_segment_ids"] == ["fixed-roadworks-link"]
+    assert counterexample["learned_clause_ids"] == []
+    assert "no eligible continuity zone" in counterexample["message"]
+
+    diagnostics = events[-1]["result"]["diagnostics"]
+    assert diagnostics["finding"] == "unrepairable_access_cut"
+    assert diagnostics["origin_label"] == "Otaranta"
+    assert diagnostics["diagnostic_route"]["feature"] == counterexample["route"]
+
+
 class _CancellableResilienceService:
     def __init__(self) -> None:
         self.entered = threading.Event()

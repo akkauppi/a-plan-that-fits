@@ -6,12 +6,14 @@ OTANIEMI_ELEVATION_RECIPE := data/recipes/espoo-otaniemi-coastal-elevation-v1.js
 OTANIEMI_BASE_OUTPUT := data/derived/espoo-otaniemi-coastal-base-v1-base-network
 OTANIEMI_FLOOD_OUTPUT := data/derived/espoo-otaniemi-coastal-v1-flood-exposure
 OTANIEMI_SYKE_POINTER := data/source/scenario-builder/espoo-otaniemi-coastal-v1/syke/espoo-otaniemi-coastal-v1.syke-coastal-flood.archive.json
+SERVICE_COVERAGE_RECIPE := data/recipes/service-coverage-otaniemi-tapiola-v1.json
 
 .PHONY: setup data data-refresh data-validate
 .PHONY: otaniemi-offline otaniemi-base otaniemi-base-refresh otaniemi-base-validate
 .PHONY: otaniemi-sources otaniemi-sources-all otaniemi-sources-refresh otaniemi-sources-coverage
 .PHONY: otaniemi-elevation otaniemi-elevation-refresh otaniemi-elevation-coverage
 .PHONY: otaniemi-flood otaniemi-flood-validate
+.PHONY: service-coverage service-coverage-validate service-coverage-refresh service-coverage-test
 .PHONY: dev dev-api dev-web test test-python test-web test-e2e build lint
 
 setup:
@@ -113,6 +115,31 @@ otaniemi-flood-validate:
 		--syke-pointer "$(OTANIEMI_SYKE_POINTER)" \
 		--output-dir "$(OTANIEMI_FLOOD_OUTPUT)" \
 		--validate-only
+
+# Rebuild Experiment 03 from committed HSY, Service Map, and OSM evidence only.
+# This is deterministic and does not contact an upstream service.
+service-coverage:
+	.venv/bin/python scripts/build_service_coverage_scenario.py \
+		--recipe $(SERVICE_COVERAGE_RECIPE)
+
+# Validate archive hashes, published-file integrity, references, connector-inclusive
+# routes, and every compiled walking distance.
+service-coverage-validate:
+	.venv/bin/python scripts/build_service_coverage_scenario.py \
+		--recipe $(SERVICE_COVERAGE_RECIPE) \
+		--validate-only
+
+# Intentionally opt-in: replace the bounded HSY and exact Service Map archives,
+# update their manifest hashes, and publish a new content-derived snapshot.
+service-coverage-refresh:
+	.venv/bin/python scripts/build_service_coverage_scenario.py \
+		--recipe $(SERVICE_COVERAGE_RECIPE) \
+		--refresh
+
+service-coverage-test:
+	.venv/bin/pytest -q \
+		services/solver/tests/test_service_coverage_evidence.py \
+		services/solver/tests/test_service_coverage_pipeline.py
 
 dev:
 	@$(MAKE) --no-print-directory -j2 dev-api dev-web

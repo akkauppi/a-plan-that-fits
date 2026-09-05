@@ -1,1 +1,1 @@
-"""Four Planters services."""
+"""Geospatial Constraint Lab services."""

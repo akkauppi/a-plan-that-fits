@@ -25,6 +25,8 @@ export interface ResilienceMapLocation {
   label: string
   point: [number, number]
   kind: 'origin' | 'destination'
+  /** Whether this location participates in the current access requirement. */
+  selected?: boolean
   status?: ResilienceLocationStatus
   detail?: string
 }
@@ -89,7 +91,7 @@ const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', feature
 
 const MAP_STYLE: StyleSpecification = {
   version: 8,
-  name: 'Four Planters resilience evidence canvas',
+  name: 'Resilient-access evidence canvas',
   sources: {},
   layers: [
     {
@@ -613,14 +615,29 @@ function tooltipContent(layerId: string, properties: Record<string, unknown>): s
   return `<span>${escapeHtml(eyebrow)}</span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(detail)}</small>${segmentId ? `<code>${escapeHtml(segmentId)}</code>` : ''}`
 }
 
-function locationAriaLabel(location: ResilienceMapLocation): string {
+// Exported for focused accessibility tests; the map itself remains the only UI consumer.
+// eslint-disable-next-line react-refresh/only-export-components
+export function resilienceLocationAriaLabel(
+  location: ResilienceMapLocation,
+  interactive = false,
+): string {
   const kind = location.kind === 'origin' ? 'Origin' : 'Destination'
+  const selection = location.selected === true
+    ? ', selected for this analysis'
+    : location.selected === false
+      ? ', not selected for this analysis'
+      : ''
   const status = location.status === 'stranded'
     ? ', stranded in current scenario'
     : location.status === 'reachable'
       ? ', reachable in current scenario'
       : ''
-  return `${kind}: ${location.label}${status}${location.detail ? `. ${location.detail}` : ''}`
+  const action = !interactive || location.selected === undefined
+    ? ''
+    : location.selected
+      ? `. Activate to remove this ${location.kind} from the analysis`
+      : `. Activate to add this ${location.kind} to the analysis`
+  return `${kind}: ${location.label}${selection}${status}${location.detail ? `. ${location.detail}` : ''}${action}`
 }
 
 export function ResilienceAnalysisMap({
@@ -873,18 +890,37 @@ export function ResilienceAnalysisMap({
     if (!map || !loaded) return
     markersRef.current.forEach((marker) => marker.remove())
     markersRef.current = locations.map((location) => {
+      const markerShell = document.createElement('div')
+      markerShell.className = [
+        'resilience-location-marker-shell',
+        location.selected === true
+          ? 'is-selected'
+          : location.selected === false
+            ? 'is-not-selected'
+            : '',
+      ].filter(Boolean).join(' ')
+
       const element = document.createElement('button')
       element.type = 'button'
       element.className = [
         'resilience-location-marker',
         `is-${location.kind}`,
         `is-${location.status ?? 'unknown'}`,
+        location.selected === true
+          ? 'is-selected'
+          : location.selected === false
+            ? 'is-not-selected'
+            : '',
       ].join(' ')
       element.textContent = location.status === 'stranded'
         ? '!'
         : location.kind === 'origin' ? 'O' : 'D'
-      element.title = locationAriaLabel(location)
-      element.setAttribute('aria-label', locationAriaLabel(location))
+      const accessibleLabel = resilienceLocationAriaLabel(location, Boolean(onLocationSelect))
+      element.title = accessibleLabel
+      element.setAttribute('aria-label', accessibleLabel)
+      if (location.selected !== undefined) {
+        element.setAttribute('aria-pressed', String(location.selected))
+      }
       if (onLocationSelect) {
         element.addEventListener('click', (event) => {
           event.stopPropagation()
@@ -893,7 +929,15 @@ export function ResilienceAnalysisMap({
       } else {
         element.tabIndex = -1
       }
-      return new maplibregl.Marker({ element, anchor: 'center' })
+      markerShell.append(element)
+      if (location.selected) {
+        const selectedBadge = document.createElement('span')
+        selectedBadge.className = 'resilience-location-marker__selection-badge'
+        selectedBadge.textContent = '✓'
+        selectedBadge.setAttribute('aria-hidden', 'true')
+        markerShell.append(selectedBadge)
+      }
+      return new maplibregl.Marker({ element: markerShell, anchor: 'center' })
         .setLngLat(location.point)
         .addTo(map)
     })
@@ -947,8 +991,9 @@ export function ResilienceAnalysisMap({
       <p className="resilience-map__sr-only" id="resilience-map-instructions">
         The map compares the frozen baseline, declared disruption, and checked continuity commitments.
         Origin markers are circles labelled O, destinations are diamonds labelled D, and stranded
-        origins are marked with an exclamation point. Flood colour indicates horizontal overlap
-        evidence only; dashed red links are explicit unavailability assumptions.
+        origins are marked with an exclamation point. Selected locations carry a visible check badge;
+        their buttons also expose the same state to assistive technology. Flood colour indicates
+        horizontal overlap evidence only; dashed red links are explicit unavailability assumptions.
       </p>
       <div
         ref={containerRef}

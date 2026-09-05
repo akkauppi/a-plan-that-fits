@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 import type { Feature, FeatureCollection, Geometry, LineString, MultiLineString } from 'geojson'
 import {
   BookOpenText,
@@ -54,7 +55,7 @@ const EMPTY_LINES: FeatureCollection<LineString | MultiLineString> = {
   features: [],
 }
 
-export function ResilienceExperiment() {
+export function ResilienceExperiment({ active = true }: { active?: boolean }) {
   const [scenario, setScenario] = useState<ResilienceScenario>()
   const [loadError, setLoadError] = useState<string>()
   const [reloadKey, setReloadKey] = useState(0)
@@ -77,6 +78,11 @@ export function ResilienceExperiment() {
   const [runError, setRunError] = useState<string>()
   const abortRef = useRef<AbortController | undefined>(undefined)
   const solveIdRef = useRef<string | undefined>(undefined)
+  const terminalStatusRef = useRef<ExperimentStatus>('idle')
+  const workbenchDialogRef = useRef<HTMLDivElement>(null)
+  const closeWorkbench = useCallback(() => setShowWorkbench(false), [])
+
+  useModalDialog(showWorkbench, workbenchDialogRef, closeWorkbench)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -99,6 +105,25 @@ export function ResilienceExperiment() {
     return () => controller.abort()
   }, [reloadKey])
 
+  useEffect(() => () => {
+    const solveId = solveIdRef.current
+    const solveWasActive = Boolean(abortRef.current)
+    abortRef.current?.abort()
+    abortRef.current = undefined
+    if (solveWasActive && solveId) void cancelResilienceSolve(solveId).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    if (active || !abortRef.current) return
+    const solveId = solveIdRef.current
+    abortRef.current.abort()
+    abortRef.current = undefined
+    setStatus('cancelled')
+    terminalStatusRef.current = 'cancelled'
+    setRunError('The analysis was cancelled when you left the experiment. No feasibility conclusion was reached.')
+    if (solveId) void cancelResilienceSolve(solveId).catch(() => undefined)
+  }, [active])
+
   const resetOutcome = useCallback(() => {
     abortRef.current?.abort()
     abortRef.current = undefined
@@ -107,6 +132,7 @@ export function ResilienceExperiment() {
     setResult(undefined)
     setRunError(undefined)
     setStatus('idle')
+    terminalStatusRef.current = 'idle'
     setMapView('disrupted')
     setEventCursor('live')
   }, [])
@@ -148,24 +174,25 @@ export function ResilienceExperiment() {
     && roadworksIds.length === 0
     && sameIds(originIds, scenario.defaults.origin_ids)
     && sameIds(gatewayIds, scenario.defaults.gateway_group_ids))
+  const visibleResult = activeEvent?.result ?? (eventCursor === 'live' ? result : undefined)
 
   const accessRecords = useMemo(() => {
     if (Array.isArray(activeEvent?.access)) return activeEvent.access
     if (Array.isArray(activeCandidate?.access)) return activeCandidate.access
-    if (result?.analysis?.access) return result.analysis.access
-    if (result?.baseline_disruption_analysis?.access) return result.baseline_disruption_analysis.access
+    if (visibleResult?.analysis?.access) return visibleResult.analysis.access
+    if (visibleResult?.baseline_disruption_analysis?.access) return visibleResult.baseline_disruption_analysis.access
     return isDefaultScenario ? scenario?.default_disruption_analysis.access : undefined
-  }, [activeCandidate?.access, activeEvent?.access, isDefaultScenario, result, scenario?.default_disruption_analysis.access])
-  const activeAnalysis = result?.analysis
-    ?? result?.baseline_disruption_analysis
+  }, [activeCandidate?.access, activeEvent?.access, isDefaultScenario, scenario?.default_disruption_analysis.access, visibleResult])
+  const activeAnalysis = visibleResult?.analysis
+    ?? visibleResult?.baseline_disruption_analysis
     ?? (isDefaultScenario ? scenario?.default_disruption_analysis : undefined)
   const selectedDecisionIds = activeEvent?.selected_decision_ids
     ?? activeCandidate?.selected_decision_ids
-    ?? result?.selected_decision_ids
+    ?? visibleResult?.selected_decision_ids
     ?? []
   const selectedSegmentIds = activeEvent?.selected_segment_ids
     ?? activeCandidate?.selected_segment_ids
-    ?? result?.selected_segment_ids
+    ?? visibleResult?.selected_segment_ids
     ?? []
   const counterexampleRoute = featureCollection(activeEvent?.route)
   const reachableRoutes = routesFor(accessRecords, 'disrupted_route', 'retained')
@@ -190,6 +217,7 @@ export function ResilienceExperiment() {
     setResult(undefined)
     setRunError(undefined)
     setStatus('solving')
+    terminalStatusRef.current = 'solving'
     setMapView('disrupted')
     setEventCursor('live')
     const request: ResilienceSolveRequest = {
@@ -208,21 +236,36 @@ export function ResilienceExperiment() {
         setEvents((current) => [...current, event])
         setEventCursor('live')
         if (event.type === 'candidate_found' || event.type === 'counterexample_found') setMapView('disrupted')
+        const terminalStatus = resilienceTerminalStatus(event.type)
+        if (terminalStatus) {
+          terminalStatusRef.current = terminalStatus
+          setStatus(terminalStatus)
+          if (terminalStatus === 'data_error') {
+            setRunError(event.message ?? 'The resilience stream reported a data or verification error.')
+          }
+        }
         if (event.result) {
           setResult(event.result)
           setStatus(event.result.status)
+          terminalStatusRef.current = event.result.status
           setMapView(event.result.status === 'verified_optimal' ? 'verified' : 'disrupted')
         }
       }, controller.signal)
       if (final) {
         setResult(final)
         setStatus(final.status)
+        terminalStatusRef.current = final.status
         setMapView(final.status === 'verified_optimal' ? 'verified' : 'disrupted')
+      } else if (terminalStatusRef.current === 'solving') {
+        terminalStatusRef.current = 'data_error'
+        setStatus('data_error')
+        setRunError('The resilience progress stream ended without a verified terminal result.')
       }
     } catch (caught: unknown) {
       if ((caught as Error).name !== 'AbortError') {
         setRunError(caught instanceof ApiError ? caught.message : 'The access analysis stream was interrupted.')
         setStatus('data_error')
+        terminalStatusRef.current = 'data_error'
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = undefined
@@ -243,8 +286,9 @@ export function ResilienceExperiment() {
     abortRef.current?.abort()
     abortRef.current = undefined
     setStatus('cancelled')
+    terminalStatusRef.current = 'cancelled'
     setRunError('The run was cancelled. No feasibility conclusion was reached.')
-    if (solveId) void cancelResilienceSolve(solveId)
+    if (solveId) void cancelResilienceSolve(solveId).catch(() => undefined)
   }, [])
 
   const reset = useCallback(() => {
@@ -282,7 +326,7 @@ export function ResilienceExperiment() {
     return (
       <main className="resilience-loading">
         {loadError ? <TriangleAlert size={26} /> : <LoaderCircle className="spin" size={24} />}
-        <h1>{loadError ? 'Otaniemi analysis unavailable' : 'Loading the frozen Otaniemi graph'}</h1>
+        <h1 data-page-heading tabIndex={-1}>{loadError ? 'Otaniemi analysis unavailable' : 'Loading the frozen Otaniemi graph'}</h1>
         <p>{loadError ?? 'Preparing 8,048 private-car street segments, municipal context, and flood-overlap evidence…'}</p>
         {loadError && <button type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry</button>}
       </main>
@@ -297,11 +341,11 @@ export function ResilienceExperiment() {
 
   return (
     <main className="resilience-experiment">
-      <aside className="resilience-instrument" aria-label="Otaniemi access scenario controls">
+      <aside className="resilience-instrument" aria-label="Otaniemi access scenario controls" inert={showWorkbench || showEvidence ? true : undefined} aria-hidden={showWorkbench || showEvidence ? true : undefined}>
         <div className="resilience-instrument__scroll">
           <section className="resilience-intro">
-            <div className="resilience-intro__kicker"><Waves size={14} />Current experiment · frozen Otaniemi</div>
-            <h1>See what stays reachable when road links are unavailable.</h1>
+            <div className="resilience-intro__kicker"><Waves size={14} />Experiment 02 · frozen Otaniemi</div>
+            <h1 data-page-heading tabIndex={-1}>See what stays reachable when road links are unavailable.</h1>
             <p>Turn published exposure into an explicit stress-test assumption, then watch a constraint solver search for the smallest set of continuity commitments.</p>
             <div className="resilience-scope-chip"><span>Private-car graph</span><span>15 representative 500 m cells</span><span>4 reviewed network exits</span></div>
           </section>
@@ -385,7 +429,7 @@ export function ResilienceExperiment() {
           </section>
 
           <section className="resilience-control resilience-budget" aria-labelledby="repair-budget-title">
-            <header><span>03</span><div><h2 id="repair-budget-title">Limit continuity commitments</h2><p>Z3 counts contiguous exposed zones, while verification still checks every OSM edge.</p></div></header>
+            <header><span>03</span><div><h2 id="repair-budget-title">Limit continuity commitments</h2><p>One Boolean groups connected flood-exposed links. It cannot reopen declared roadworks; verification still checks every OSM edge.</p></div></header>
             <div className="resilience-budget__value">
               <button type="button" aria-label="Decrease continuity budget" onClick={() => updateScenario(() => setRepairBudget((value) => Math.max(0, value - 1)))} disabled={isSolving || repairBudget === 0}><Minus size={16} /></button>
               <output aria-label={`${repairBudget} continuity commitments`}><strong>{repairBudget}</strong><span>zones<br />maximum</span></output>
@@ -450,14 +494,14 @@ export function ResilienceExperiment() {
           </details>
 
           <footer className="resilience-footer">
-            <button type="button" onClick={reset}><RotateCcw size={13} />Reset experiment</button>
+            <button type="button" onClick={reset} disabled={isSolving}><RotateCcw size={13} />Reset experiment</button>
             <code>{scenario.snapshot_id}</code>
             <span>OSM · ODbL / Syke & Espoo · CC BY 4.0</span>
           </footer>
         </div>
       </aside>
 
-      <section className={`resilience-map-region ${editingRoadworks ? 'is-editing-roadworks' : ''}`} aria-label="Otaniemi disruption analysis map">
+      <section className={`resilience-map-region ${editingRoadworks ? 'is-editing-roadworks' : ''}`} aria-label="Otaniemi disruption analysis map" inert={showWorkbench || showEvidence ? true : undefined} aria-hidden={showWorkbench || showEvidence ? true : undefined}>
         {editingRoadworks && <div className="roadworks-banner"><Construction size={14} /><strong>Roadworks input</strong><span>Click a private-car street to toggle an explicit closure.</span><button type="button" onClick={() => setEditingRoadworks(false)}>Done</button></div>}
         <ResilienceAnalysisMap
           baseNetwork={scenario.base_network}
@@ -487,17 +531,17 @@ export function ResilienceExperiment() {
           iteration={activeEvent?.iteration}
           statusMessage={activeEvent?.message ?? result?.message}
           verifiedAvailable={result?.status === 'verified_optimal'}
-          onNetworkSegmentToggle={toggleRoadwork}
-          onLocationSelect={selectLocation}
+          onNetworkSegmentToggle={isSolving ? undefined : toggleRoadwork}
+          onLocationSelect={isSolving ? undefined : selectLocation}
           dataAttribution="Syke flood overlap · City of Espoo addresses/buildings"
         />
       </section>
 
       {showWorkbench && (
-        <div className="resilience-sheet-layer" role="dialog" aria-modal="true" aria-label="Constraint solver workbench">
-          <button type="button" className="resilience-sheet-layer__backdrop" onClick={() => setShowWorkbench(false)} aria-label="Close constraint workbench" />
-          <div className="resilience-workbench-sheet">
-            <header><div><span>Method you can inspect</span><strong>Constraint solver workbench</strong></div><button type="button" onClick={() => setShowWorkbench(false)} aria-label="Close constraint workbench"><X size={18} /></button></header>
+        <div className="resilience-sheet-layer" role="dialog" aria-modal="true" aria-labelledby="constraint-workbench-dialog-title">
+          <button type="button" className="resilience-sheet-layer__backdrop" onClick={closeWorkbench} aria-label="Close constraint workbench" />
+          <div className="resilience-workbench-sheet" ref={workbenchDialogRef} tabIndex={-1}>
+            <header><div><span>Method you can inspect</span><strong id="constraint-workbench-dialog-title">Constraint solver workbench</strong></div><button type="button" onClick={closeWorkbench} aria-label="Close constraint workbench" data-dialog-close><X size={18} /></button></header>
             <ConstraintWorkbench
               scenarioLabel={`Otaniemi · 1/${returnPeriod.toLocaleString('en-US')} stress test · private-car mode`}
               budget={repairBudget}
@@ -521,8 +565,8 @@ export function ResilienceExperiment() {
       )}
 
       {showEvidence && (
-        <div className="resilience-sheet-layer" role="dialog" aria-modal="true" aria-label="Scenario evidence and location builder">
-          <button type="button" className="resilience-sheet-layer__backdrop" onClick={() => setShowEvidence(false)} aria-label="Close scenario evidence" />
+        <div className="resilience-sheet-layer">
+          <div className="resilience-sheet-layer__backdrop" aria-hidden="true" />
           <ScenarioBuilderDrawer onClose={() => setShowEvidence(false)} />
         </div>
       )}
@@ -577,15 +621,21 @@ function ResultSummary({
             {aggregationCost != null && <div><dt>Length cost</dt><dd>{aggregationCost.toLocaleString('en')} m</dd></div>}
           </dl>
           {usesServiceLinks && <p className="resilience-result__warning"><TriangleAlert size={12} />The minimum dependency uses mapped service or driveway links. Missing OSM restrictions do not establish public or legal access; field review is essential.</p>}
-          <em>A selected zone is a minimum model dependency—not a finding that its roads are open, safe, legal, or physically passable.</em>
+          <em>A selected zone belongs to this returned optimum; an equally good alternative may differ. It is not a finding that its roads are open, safe, legal, or physically passable.</em>
         </div>
       </section>
     )
   }
   if (status === 'verified_unsat' && result) {
+    const unrepairableCut = result.diagnostics?.finding === 'unrepairable_access_cut'
     return (
-      <section className="resilience-result is-unsat" aria-label="Verified insufficient continuity budget">
-        <span><TriangleAlert size={18} /></span><div><small>Verified infeasible under encoded choices</small><h2>{budget} commitments are insufficient</h2><p>{result.message} This does not mean that no physical or operational solution exists.</p><button type="button" onClick={onRaiseBudget}>Try budget {Math.min(16, budget + 2)}</button></div>
+      <section className="resilience-result is-unsat" aria-label={unrepairableCut ? 'Verified unrepairable graph cut' : 'Verified insufficient continuity budget'}>
+        <span><TriangleAlert size={18} /></span><div>
+          <small>Verified infeasible under encoded choices</small>
+          <h2>{unrepairableCut ? 'No eligible continuity choice crosses this cut' : `${budget} commitments are insufficient`}</h2>
+          <p>{result.message} {unrepairableCut ? 'Increasing the budget alone cannot change this finding; review fixed closures, decision eligibility, required origins, or permitted exits.' : 'This does not mean that no physical or operational solution exists.'}</p>
+          {!unrepairableCut && <button type="button" onClick={onRaiseBudget}>Try budget {Math.min(16, budget + 2)}</button>}
+        </div>
       </section>
     )
   }
@@ -624,8 +674,11 @@ function traceLabel(event: ResilienceSolveEvent): string {
   if (event.type === 'started') return 'Compiled map facts into an explicit availability scenario.'
   if (event.type === 'candidate_found') return 'Z3 proposed a continuity-zone assignment.'
   if (event.type === 'counterexample_found') return 'NetworkX found a stranded origin and returned a graph frontier.'
+  if (event.type === 'unrepairable_cut') return 'The directed cut contains no eligible continuity-zone decision.'
   if (event.type === 'verified_optimal') return 'A fresh graph recomputed every required access relation.'
-  if (event.type === 'verified_unsat') return 'The learned necessary cuts exceed the current budget.'
+  if (event.type === 'verified_unsat') return event.result?.diagnostics?.finding === 'unrepairable_access_cut'
+    ? 'No eligible decision crosses the verified directed cut.'
+    : 'The learned necessary cuts exceed the current budget.'
   return 'Analysis state changed.'
 }
 
@@ -683,6 +736,7 @@ function mapLocations(
     label: origin.label,
     point: origin.point,
     kind: 'origin' as const,
+    selected: selectedOriginIds.includes(origin.id),
     status: !selectedOriginIds.includes(origin.id)
       ? 'unknown' as const
       : access.get(origin.id) === 'stranded'
@@ -697,6 +751,7 @@ function mapLocations(
     label: gateway.label,
     point: gateway.point,
     kind: 'destination' as const,
+    selected: selectedGatewayIds.includes(gateway.id),
     status: 'unknown' as const,
     detail: `${selectedGatewayIds.includes(gateway.id) ? 'Permitted OR-destination' : 'Not selected'} · reviewed outbound graph endpoint · not certified safe`,
   }))
@@ -717,4 +772,59 @@ function humanStatus(status: ResilienceResultStatus): string {
   if (status === 'timeout') return 'Timeout — no feasibility conclusion'
   if (status === 'cancelled') return 'Cancelled — no feasibility conclusion'
   return 'Data or verification error'
+}
+
+function resilienceTerminalStatus(type: string): ResilienceResultStatus | undefined {
+  if (type === 'verified_optimal' || type === 'verified_unsat' || type === 'timeout' || type === 'cancelled' || type === 'data_error') return type
+  return undefined
+}
+
+function useModalDialog(
+  open: boolean,
+  dialogRef: RefObject<HTMLElement | null>,
+  onClose: () => void,
+) {
+  const restoreFocusRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const dialog = dialogRef.current
+    const focusableSelector = 'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+    const frame = window.requestAnimationFrame(() => {
+      const initialFocus = dialog?.querySelector<HTMLElement>('[data-dialog-close]')
+      if (initialFocus) initialFocus.focus()
+      else dialog?.focus()
+    })
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab' || !dialog) return
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+        .filter((element) => !element.hasAttribute('disabled') && element.getClientRects().length > 0)
+      if (!focusable.length) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable.at(-1)
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last?.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first?.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', handleKeyDown)
+      restoreFocusRef.current?.focus()
+      restoreFocusRef.current = null
+    }
+  }, [dialogRef, onClose, open])
 }

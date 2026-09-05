@@ -27,7 +27,7 @@ export function Methodology({ scenario, onClose }: MethodologyProps) {
         <div><span>Methods & limits</span><h2 id="method-title">What the proof means</h2></div>
         <button ref={closeRef} type="button" className="icon-button" onClick={onClose} aria-label="Close methods panel"><X size={18} /></button>
       </div>
-      <p className="method-lede">Four Planters tests network permeability. It is a demonstrator and research instrument—not an operational traffic plan.</p>
+      <p className="method-lede">The modal-filter placement experiment tests network permeability. It is a demonstrator and research instrument—not an operational traffic plan.</p>
 
       <section>
         <h3><CheckCircle2 size={17} />What can be claimed</h3>

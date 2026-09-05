@@ -1,7 +1,7 @@
 [project]
-name = "four-planters"
+name = "geospatial-constraint-lab"
 version = "0.1.0"
-description = "A reproducible urban-network modal-filter solver"
+description = "Reproducible geospatial constraint-solving experiments"
 requires-python = ">=3.11"
 dependencies = [
   "anyio>=4.4,<4.8",

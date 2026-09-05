@@ -83,7 +83,7 @@ def roadworks_document(features: list[dict] | None = None) -> dict:
             "licence": {
                 "name": "CC BY 4.0",
                 "url": "https://creativecommons.org/licenses/by/4.0/",
-                "attribution": "Example input prepared for Four Planters",
+                "attribution": "Example input prepared for the geospatial constraint lab",
             },
             "restriction_interpretation": "explicit_declared_effects_only",
             "generic_event_inference": "prohibited",

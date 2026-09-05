@@ -13,16 +13,28 @@ const settings: ScenarioSettings = {
 }
 
 describe('experience URL state', () => {
-  it('defaults to the Otaniemi research experience', () => {
-    expect(experienceFromUrl('')).toBe('resilience')
-    expect(experienceFromUrl('?experience=unknown')).toBe('resilience')
+  it('defaults to the neutral experiment overview', () => {
+    expect(experienceFromUrl('')).toBe('overview')
+    expect(experienceFromUrl('?experience=unknown')).toBe('overview')
   })
 
-  it('round-trips the Kallio baseline alongside solver settings', () => {
+  it('round-trips all explicit experiments alongside solver settings', () => {
     const search = settingsToSearch({ ...settings, budget: 6 }, 'baseline')
     expect(experienceFromUrl(search)).toBe('baseline')
     expect(settingsFromUrl(settings, search).budget).toBe(6)
     expect(new URLSearchParams(search).get('experience')).toBe('baseline')
+
+    const resilienceSearch = settingsToSearch(settings, 'resilience')
+    expect(experienceFromUrl(resilienceSearch)).toBe('resilience')
+    expect(new URLSearchParams(resilienceSearch).get('experience')).toBe('resilience')
+
+    const coverageSearch = settingsToSearch(settings, 'coverage')
+    expect(experienceFromUrl(coverageSearch)).toBe('coverage')
+    expect(new URLSearchParams(coverageSearch).get('experience')).toBe('coverage')
+  })
+
+  it('keeps the overview URL free of experiment settings', () => {
+    expect(settingsToSearch({ ...settings, budget: 6 }, 'overview')).toBe('')
   })
 })
 

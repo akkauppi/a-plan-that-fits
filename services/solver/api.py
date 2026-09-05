@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import queue
 import threading
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,11 @@ from .scenario_builder_api import (
     BuilderBuildRequest,
     BuilderSelection,
     ScenarioBuilderService,
+)
+from .service_coverage_api import (
+    ServiceCoverageCancelRequest,
+    ServiceCoverageService,
+    ServiceCoverageSolveRequest,
 )
 
 
@@ -88,13 +94,55 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Warm immutable evidence before health checks admit browser traffic."""
 
     try:
-        await asyncio.to_thread(app.state.resilience_service.scenario_payload)
+        resilience_payload = await asyncio.to_thread(
+            app.state.resilience_service.scenario_payload
+        )
         app.state.resilience_startup_error = None
-    except (OSError, TypeError, ValueError) as error:
+        app.state.experiment_readiness["resilient_access"] = _ready_experiment(
+            resilience_payload,
+            fallback_scenario_id="otaniemi-access-v1",
+        )
+    except (OSError, TypeError, ValueError, KeyError) as error:
         # Keep the service observable: the scenario endpoint will return the scoped
         # data_error instead of preventing health and diagnostics from starting.
         app.state.resilience_startup_error = str(error)
+        app.state.experiment_readiness["resilient_access"] = _failed_experiment(error)
+    try:
+        service_payload = await asyncio.to_thread(
+            app.state.service_coverage_service.scenario_payload
+        )
+        app.state.service_coverage_startup_error = None
+        app.state.experiment_readiness["service_coverage"] = _ready_experiment(
+            service_payload,
+            fallback_scenario_id="service-coverage-otaniemi-tapiola-v1",
+        )
+    except (OSError, TypeError, ValueError, KeyError) as error:
+        # Experiments fail independently: missing service-coverage evidence must not
+        # prevent health checks or either established experiment from starting.
+        app.state.service_coverage_startup_error = str(error)
+        app.state.experiment_readiness["service_coverage"] = _failed_experiment(error)
     yield
+
+
+def _ready_experiment(
+    payload: Mapping[str, Any], *, fallback_scenario_id: str
+) -> dict[str, Any]:
+    return {
+        "status": "ready",
+        "ready": True,
+        "scenario_id": str(
+            payload.get("scenario_id") or payload.get("id") or fallback_scenario_id
+        ),
+        "snapshot_id": payload.get("snapshot_id"),
+    }
+
+
+def _failed_experiment(error: BaseException) -> dict[str, Any]:
+    return {
+        "status": "data_error",
+        "ready": False,
+        "error": f"{type(error).__name__}: {error}",
+    }
 
 
 async def _sse(
@@ -112,7 +160,7 @@ async def _sse(
         finally:
             mailbox.put(None)
 
-    thread = threading.Thread(target=worker, name="four-planters-solve", daemon=True)
+    thread = threading.Thread(target=worker, name="geospatial-lab-solve", daemon=True)
     thread.start()
     sequence = 0
     try:
@@ -173,10 +221,22 @@ def _resilience_public_event(event: dict[str, Any]) -> dict[str, Any]:
             "constraint_expression": " ∨ ".join(str(value) for value in variables),
         }
     if event_type == "unrepairable_cut":
+        route = event.get("diagnostic_route")
+        route_feature = route.get("feature") if isinstance(route, dict) else None
+        witness_ids = (
+            route.get("unavailable_segment_ids", []) if isinstance(route, dict) else []
+        )
         return {
             **event,
             "type": "counterexample_found",
-            "message": "A stranded origin has no eligible continuity zone on its frontier.",
+            "finding": event.get("finding", "unrepairable_access_cut"),
+            "message": (
+                f"{event.get('origin_label', 'A stranded origin')} has no eligible "
+                "continuity zone on its directed frontier."
+            ),
+            "route": route_feature,
+            "witness_segment_ids": witness_ids,
+            "learned_clause_ids": [],
         }
     return event
 
@@ -258,6 +318,89 @@ def _iter_resilience_solve(
             cancel_event.set()
 
 
+def _iter_service_coverage_solve(
+    service: ServiceCoverageService,
+    request: ServiceCoverageSolveRequest,
+    solve_id: str,
+    cancel_event: threading.Event,
+) -> Iterator[dict[str, Any]]:
+    """Expose the direct allocation solve as truthful, inspectable SSE stages."""
+
+    mailbox: queue.Queue[dict[str, Any] | BaseException | None] = queue.Queue()
+    result_holder: list[dict[str, Any]] = []
+
+    def emit(event: dict[str, Any]) -> None:
+        mailbox.put(event)
+
+    def worker() -> None:
+        try:
+            result_holder.append(
+                service.solve(request, cancel_event=cancel_event, on_event=emit)
+            )
+        except BaseException as error:  # pragma: no cover - defensive stream boundary
+            mailbox.put(error)
+        finally:
+            mailbox.put(None)
+
+    thread = threading.Thread(
+        target=worker,
+        name="service-coverage-solve",
+        daemon=True,
+    )
+    thread.start()
+    yield {
+        "type": "started",
+        "solve_id": solve_id,
+        "message": (
+            "The frozen demand, facility and walking evidence is loaded. Network "
+            "relationships will be compiled before Z3 assigns coverage."
+        ),
+    }
+    try:
+        while True:
+            item = mailbox.get()
+            if item is None:
+                break
+            if isinstance(item, BaseException):
+                result_holder.append(
+                    {
+                        "status": "data_error",
+                        "message": f"{type(item).__name__}: {item}",
+                        "claim_scope": (
+                            "The allocation worker failed; no feasibility or "
+                            "infeasibility claim was made."
+                        ),
+                        "selected_site_ids": [],
+                        "assignments": [],
+                        "site_loads": [],
+                    }
+                )
+                continue
+            yield {"solve_id": solve_id, **item}
+        result = result_holder[-1] if result_holder else {
+            "status": "data_error",
+            "message": "The allocation worker ended without a terminal result.",
+            "selected_site_ids": [],
+            "assignments": [],
+            "site_loads": [],
+        }
+        snapshot = result.get("snapshot")
+        if isinstance(snapshot, dict):
+            result.setdefault("snapshot_id", snapshot.get("snapshot_id"))
+        timing = result.get("timing")
+        if isinstance(timing, dict):
+            result.setdefault("solver_timing_ms", timing.get("elapsed_ms"))
+        yield {
+            "type": str(result.get("status", "data_error")),
+            "solve_id": solve_id,
+            "message": str(result.get("message", "Allocation analysis complete.")),
+            "result": result,
+        }
+    finally:
+        if thread.is_alive():
+            cancel_event.set()
+
+
 def create_app(
     *,
     scenario: Scenario | None = None,
@@ -265,14 +408,17 @@ def create_app(
     browser_path: str | Path | None = DEFAULT_BROWSER_PATH,
     scenario_builder: ScenarioBuilderService | None = None,
     resilience_service: OtaniemiResilienceService | None = None,
+    service_coverage_service: ServiceCoverageService | None = None,
 ) -> FastAPI:
     app = FastAPI(
-        title="Four Planters Solver API",
+        title="Geospatial Constraint Lab API",
         lifespan=_application_lifespan,
         version="0.1.0",
         description=(
-            "Counterexample-guided modal-filter search over a frozen OpenStreetMap-derived "
-            "Helsinki street graph. Results are scoped to the encoded graph assumptions."
+            "Geospatial constraint-solving experiments over frozen Helsinki-region evidence: "
+            "counterexample-guided modal-filter and resilient-access models, plus directly "
+            "compiled capacitated public-service allocation. Results are scoped to the encoded "
+            "graph and scenario assumptions."
         ),
     )
     app.add_middleware(
@@ -290,6 +436,7 @@ def create_app(
     )
     registry = SessionRegistry()
     resilience_registry = CancellationRegistry()
+    service_coverage_registry = CancellationRegistry()
     loaded_scenario: Scenario | None = scenario
     load_error: str | None = None
     if loaded_scenario is None:
@@ -305,6 +452,36 @@ def create_app(
     app.state.scenario_builder = scenario_builder or ScenarioBuilderService()
     app.state.resilience_service = resilience_service or OtaniemiResilienceService()
     app.state.resilience_registry = resilience_registry
+    app.state.service_coverage_service = (
+        service_coverage_service or ServiceCoverageService()
+    )
+    app.state.service_coverage_registry = service_coverage_registry
+    app.state.experiment_readiness = {
+        "modal_filter": (
+            {
+                "status": "ready",
+                "ready": True,
+                "scenario_id": loaded_scenario.id,
+                "snapshot_id": loaded_scenario.snapshot_id,
+            }
+            if loaded_scenario is not None
+            else {
+                "status": "data_error",
+                "ready": False,
+                "error": load_error or "No modal-filter scenario loaded",
+            }
+        ),
+        "resilient_access": {
+            "status": "not_checked",
+            "ready": False,
+            "scenario_id": "otaniemi-access-v1",
+        },
+        "service_coverage": {
+            "status": "not_checked",
+            "ready": False,
+            "scenario_id": "service-coverage-otaniemi-tapiola-v1",
+        },
+    }
 
     def require_engine() -> FourPlantersSolver:
         if app.state.engine is None:
@@ -324,15 +501,18 @@ def create_app(
                 "status": "data_error",
                 "ready": False,
                 "error": app.state.load_error,
+                "service": "geospatial-constraint-lab",
+                "experiments": copy.deepcopy(app.state.experiment_readiness),
             }
         current: Scenario = app.state.scenario
         return {
             "status": "ok",
             "ready": True,
-            "service": "four-planters-solver",
+            "service": "geospatial-constraint-lab",
             "scenario_id": current.id,
             "snapshot_id": current.snapshot_id,
             "stats": current.public_payload()["stats"],
+            "experiments": copy.deepcopy(app.state.experiment_readiness),
         }
 
     @app.get("/api/scenario")
@@ -386,6 +566,63 @@ def create_app(
     @app.post("/api/resilience/solve/cancel")
     async def resilience_cancel(request: ResilienceCancelRequest) -> JSONResponse:
         accepted = resilience_registry.cancel(request.solve_id)
+        return JSONResponse(
+            status_code=202 if accepted else 404,
+            content={
+                "status": "cancellation_requested" if accepted else "not_active",
+                "solve_id": request.solve_id,
+                "accepted": accepted,
+            },
+        )
+
+    @app.get("/api/service-coverage/scenario")
+    async def service_coverage_scenario() -> dict[str, Any]:
+        try:
+            return await asyncio.to_thread(
+                app.state.service_coverage_service.scenario_payload
+            )
+        except (OSError, TypeError, ValueError, KeyError) as error:
+            raise HTTPException(
+                status_code=503,
+                detail={"status": "data_error", "message": str(error)},
+            ) from error
+
+    @app.post("/api/service-coverage/solve")
+    async def service_coverage_solve(
+        request: ServiceCoverageSolveRequest,
+    ) -> StreamingResponse:
+        solve_id = str(uuid.uuid4())
+        cancel_event = service_coverage_registry.start(solve_id)
+        events = _iter_service_coverage_solve(
+            app.state.service_coverage_service,
+            request,
+            solve_id,
+            cancel_event,
+        )
+
+        async def stream() -> AsyncIterator[str]:
+            try:
+                async for event in _sse(events, cancel_event):
+                    yield event
+            finally:
+                service_coverage_registry.finish(solve_id)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+                "X-Solve-ID": solve_id,
+            },
+        )
+
+    @app.post("/api/service-coverage/solve/cancel")
+    async def service_coverage_cancel(
+        request: ServiceCoverageCancelRequest,
+    ) -> JSONResponse:
+        accepted = service_coverage_registry.cancel(request.solve_id)
         return JSONResponse(
             status_code=202 if accepted else 404,
             content={

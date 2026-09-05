@@ -1,19 +1,20 @@
-# Project decision: conclude Four Planters and pursue resilient access
+# Geospatial Constraint Lab: project history and roadmap
 
 - **Status:** accepted
 - **Decision date:** 2026-08-30
-- **First successor vertical slice:** 2026-08-31
-- **Four Planters baseline:** commit `52fb267`
-- **Successor direction:** Resilient Access
+- **Second experiment vertical slice:** 2026-08-31
+- **Third experiment vertical slice:** 2026-09-03
+- **Modal-filter baseline:** commit `52fb267` (originally branded Four Planters)
+- **Shared umbrella:** Geospatial Constraint Lab
 
 ## Decision
 
-Four Planters is complete as a small, reproducible research demonstrator. The
-modal-filter experiment will remain a maintained baseline and regression fixture,
-but it will not be expanded as the primary research question without new evidence
-that changes its scientific value.
+The original project is complete as a small, reproducible **modal-filter placement**
+experiment. It remains a maintained, first-class
+experiment and regression fixture. Its portal/filter formulation will not be
+expanded without new evidence that changes its scientific value.
 
-The next experiment will study **access resilience under flooding and planned street
+The second experiment studies **access resilience under flooding and planned street
 works**. These are two instances of the same network-availability problem:
 
 - flooding makes edges unavailable in one or more externally defined hazard
@@ -21,35 +22,45 @@ works**. These are two instances of the same network-availability problem:
 - roadworks make edges unavailable or mode-restricted during selected time windows,
   with some timing choices under the planner's control.
 
-The successor workspace now defaults to **Otaniemi, Espoo** after a bounded data and
+The flood-resilient-access experiment uses **Otaniemi, Espoo** after a bounded data and
 network audit. Otaniemi is deliberately coastal, but its actual hazard exposure is
 established from sourced flood layers rather than inferred from its name, shoreline,
 or elevation alone.
+
+The third experiment studies **equitable service coverage in Otaniemi–Tapiola**. It
+asks Z3 to choose from reviewed public-facility locations and assign every included
+published population cell under a site budget, walking-distance limit, and explicitly
+analytical capacity. NetworkX supplies and independently repeats the network routes.
+It is an equal experiment, not an extension or preferred use of the flood model.
 
 The application should also stop treating one checked-in polygon as its only entry
 point. A user should be able to select or draw a study area, inspect data coverage,
 and ask the backend to build a reproducible network scenario for that location.
 
-This decision now has a complete first vertical slice. The Otaniemi experiment
+The flood decision now has a complete first vertical slice. The Otaniemi experiment
 provides typed location recipes, fixed-endpoint OSM/MML/Syke/Espoo adapters, real
 frozen source responses, a directed multi-mode OSM network, terrain-quality-control
 evidence, an exposure-only coastal-flood overlay, Espoo-derived representative
 origins, reviewed outbound graph endpoints, an explicit private-car availability
 stress rule, a streaming counterexample-guided solver, and fresh graph verification.
-The browser opens this workspace first; the frozen Kallio–Vallila planter map and
-solver remain available as the completed baseline. See the
+The browser presents it alongside the frozen Kallio–Vallila modal-filter map and
+Otaniemi–Tapiola service allocation as equal examples of the shared method. See the
 [experiment method and provenance](resilient-access-foundation.md).
 
 The browser exposes the important boundary honestly. The Syke polygons are source
 exposure evidence until a user explicitly enables the binary
 exposure-as-unavailable rule; MML elevation is never used to close a road. A selected
-continuity zone is a minimum dependency under that rule, not a finding that its links
-are open, safe, legal, or practically protectable.
+continuity commitment is one Boolean group of connected flood-exposed OSM fragments,
+joined by normalized street or way/highway continuity. It may restore only
+flood-assumption removals; fixed roadworks remain unavailable. The budget counts the
+group once while outputs enumerate its physical fragments. Selection is a minimum
+dependency in this encoded model, not a finding that its links are open, safe, legal,
+operable, protectable, or funded.
 
-## Implemented successor status
+## Implemented flood-resilient-access status
 
-The recipe, audit, bounded CLI prototype, frozen network, access solver, and primary
-browser story are complete without changing the Kallio fixture. Field-specific
+The recipe, audit, bounded CLI prototype, frozen network, access solver, and browser
+story are complete without changing the Kallio fixture. Field-specific
 reconciliation and downstream combined-distribution review remain partly complete:
 
 - the `finland-resilient-access-v1` recipe accepts bounded point/radius or simple
@@ -112,10 +123,70 @@ evidence remains separately attributed rather than silently replacing OSM topolo
 so a field-by-field precedence policy and final combined-database distribution
 obligations must be decided before any deeper join.
 
-## Why the original experiment stops here
+## Implemented equitable-service-coverage status
 
-Four Planters successfully demonstrates frozen geodata, graph construction,
-constraint solving, streamed counterexamples, independent verification,
+Experiment 03 is a complete, bounded allocation slice over a frozen
+Otaniemi–Tapiola evidence package:
+
+- scenario `service-coverage-otaniemi-tapiola-v1` covers bbox
+  `[24.802, 60.172, 24.8425, 60.1912]`;
+- content snapshot `coverage-4e7e682613eb7d074b8a3341` was observed at
+  `2026-09-01T10:10:33.425Z`;
+- 33 published HSY 2025 population-grid cells represent 8,554 included residents;
+- ten exact Helsinki metropolitan Service Map unit records form the reviewed
+  candidate set;
+- the frozen OSM walking snapshot is `base-c8dcbcfaca2b2c9498420681`;
+- every one of the 330 cell/site relations has a deterministic connector-inclusive distance
+  and route;
+  the compact verification graph has 3,207 nodes and 4,426 directed edges.
+
+HSY's archived response is timestamped `2026-09-01T09:18:48.333Z`, and all 33
+features report source update `2026-08-05Z`. The ten Service Map units are archived
+individually from exact unit endpoints. HSY and Service Map evidence is CC BY 4.0;
+OSM is ODbL 1.0. Checksums, endpoints, CRS transformations, source IDs, suppression
+cautions, and review decisions are recorded in the
+[evidence note](service-coverage-data-notes.md),
+[source manifest](../data/source/service-coverage/otaniemi-tapiola-v1/source-manifest.json),
+and [derived metadata](../data/derived/service-coverage-otaniemi-tapiola-v1/metadata.json).
+The normalized content fingerprint covers the complete top-level, solver, and browser
+payloads. Offline validation re-reads the split files, requires all snapshot IDs and
+payload copies to agree, and verifies every metadata-recorded byte size and SHA-256.
+
+NetworkX compiles this complete finite matrix before solving. Each total includes the
+projected straight-line demand snap, directed graph shortest path, and projected
+straight-line site snap; the connectors are analytical approximations rather than
+mapped entrances or accessibility evidence. Z3 then jointly chooses
+`open[site]` and `assign[cell,site]` variables under exactly-one assignment,
+open-site implication, maximum-distance, declared-capacity, budget, force, and
+prohibit constraints. A fresh NetworkX/arithmetic verifier audits the connector lengths,
+exact node/edge chains, shortest graph components, total arithmetic and route geometry,
+then checks all loads and hard constraints. Unlike the two graph-modification
+experiments, this small slice does not need counterexample-guided path discovery;
+that difference is part of its teaching value.
+
+The default request uses at most four sites, a 1,600 m connector-inclusive distance limit,
+capacity multiplier 1.0, and a 30-second timeout. It is verified optimal with two
+sites—Haukilahden lukio and Tapiolan nuorisotila—worst assigned distance
+1,231.82 m, population-weighted mean 757.83 m, and loads 4,248 and 4,306. Its objective
+vector is `[2, 123182, 648245240, 58]`. The names
+are a reproducibility observation, not a recommendation. A budget of one is verified
+UNSAT because a single declared 5,000-person site cannot accept 8,554 included
+people. A separate 1,000 m
+sensitivity is UNSAT because the reviewed set leaves a geographic coverage gap.
+Timeout remains indeterminate, never UNSAT.
+
+Every site's 5,000-person capacity is an analytical scenario assumption, not a
+Service Map fact, occupancy, throughput, staffing estimate, or suitability finding.
+Population cells remain indivisible aggregate weights; suppressed demand is not
+imputed. The result does not establish household accessibility, actual service
+demand, accessible entrances, opening hours, staffing, legal availability, or a
+policy definition of equity, and it is not a facility recommendation. See the
+[method note](service-coverage-foundation.md) for the exact proof boundary.
+
+## Modal-filter experiment: research conclusion
+
+The modal-filter placement experiment successfully demonstrates frozen geodata,
+graph construction, constraint solving, streamed counterexamples, independent verification,
 alternatives, and understandable infeasibility. Its scientific ceiling is lower
 than its engineering quality, however:
 
@@ -140,7 +211,7 @@ The reusable contribution is a general pattern:
 > Choose discrete spatial actions subject to global network requirements, find
 > counterexamples in the real graph, and independently verify the final claim.
 
-The successor should retain:
+The shared laboratory should retain:
 
 - deterministic source snapshots, checksums, licences, coordinate systems, and
   stable identifiers;
@@ -148,6 +219,9 @@ The successor should retain:
 - the directed graph and explicit mode-permission semantics, adding separately
   constructed mode graphs only where sources and validation support them;
 - Z3 decisions combined with NetworkX counterexample discovery;
+- direct finite-relation models when GIS can compile the complete relationship
+  matrix before solving, as in service coverage, without forcing every problem into
+  a counterexample-guided loop;
 - explicit lexicographic objectives instead of a hidden aggregate score;
 - streamed candidate, counterexample, refinement, and verification events;
 - alternatives with the same objective vector;
@@ -155,11 +229,12 @@ The successor should retain:
 - timeout, cancellation, data error, and verified infeasibility as distinct states;
 - fresh-graph final verification before any result receives a verified label.
 
-The Four Planters scenario should remain in the repository as a deterministic
+The modal-filter scenario should remain in the repository as a deterministic
 fixture while scenario construction and solver concepts are extracted from its
-portal/filter-specific vocabulary.
+portal/filter-specific vocabulary. Historical code, path, and screenshot identifiers
+may retain the `four-planters` name to preserve reproducibility.
 
-## Successor research question
+## Flood-resilient-access research question
 
 The initial question is:
 
@@ -201,7 +276,8 @@ traffic arrangements.
 
 ## Otaniemi pilot
 
-Otaniemi is the successor-workspace default, not a hard-coded permanent boundary.
+Otaniemi is the flood-resilient-access experiment's default, not a hard-coded
+permanent boundary.
 The checked pilot polygon was selected after inspecting:
 
 - coastline, low terrain, and the coverage of published flood-hazard scenarios;
@@ -281,7 +357,7 @@ another country would require a new CRS/source profile, not silent fallback data
 
 ### Current generalization constraints to remove
 
-The two frozen runtimes must not be mistaken for a general scenario factory:
+The three frozen runtimes must not be mistaken for a general scenario factory:
 
 - `scripts/build_scenario.py` still hard-codes the Kallio–Vallila bbox, paths,
   name, source archive, portal defaults, and scenario ID;
@@ -290,6 +366,9 @@ The two frozen runtimes must not be mistaken for a general scenario factory:
   rather than a general published scenario package;
 - `services/solver/scenario.py` resolves one fixed derived dataset;
 - `services/solver/otaniemi_resilience.py` resolves one fixed Otaniemi evidence set;
+- `scripts/build_service_coverage_scenario.py` is recipe-driven and reproducible,
+  but the service runtime currently resolves the one frozen Otaniemi–Tapiola
+  artifact rather than publishing arbitrary user-built demand/site packages;
 - the Kallio baseline still uses planter/portal vocabulary by design, while the
   Otaniemi workspace uses origin/gateway/continuity vocabulary;
 - a custom builder job publishes only a base-network artifact and cannot yet load it
@@ -311,6 +390,8 @@ source should silently overwrite another.
 | [MML/NLS Topographic Database](https://www.maanmittauslaitos.fi/en/geopackage) | National fallback for roads, buildings, waterways, and land features | Open GeoPackage/custom-area data may complement OSM. A reconciliation policy and per-feature provenance are required. |
 | [City of Espoo open geographic data](https://www.espoo.fi/en/open-data-of-the-geographic-information-unit) | Street areas, buildings, addresses, cycling routes, water features, and selected municipal context | Six WFS layers are implemented as exact frozen GML responses with CC BY 4.0 provenance. Buildings are rendered and 297 in-core address points form 15 representative cells; source timestamps are response times and coverage remains `unknown`. Municipal evidence does not overwrite OSM topology. |
 | [Finnish Environment Institute (Syke) web map services](https://www.syke.fi/en/environmental-data/open-web-services/web-map-services) | Published flood-hazard, inundation, and risk scenarios | The 1/100 and 1/1000 sea-flood layers are frozen and intersected with the base graph as exposure evidence. The runtime may treat exposure as unavailable only under a separate explicit user stress rule; the source never asserts passability. Syke requires a unique application identifier for long-term or intensive WFS use. |
+| [HSY population grid](https://hri.fi/data/en/dataset/vaestotietoruudukko) | Aggregate resident-count demand for service allocation | The bounded 2025 WFS response is archived under CC BY 4.0. Only 33 published cells selected by representative point are modelled; privacy-suppressed cells are neither exposed nor imputed, and population is not asserted to equal service demand. |
+| [Helsinki metropolitan Service Map API](https://hri.fi/data/en/dataset/paakaupunkiseudun-palvelukartan-rest-rajapinta) | Public-facility identity, label, category and location | Ten reviewed unit records are frozen from their exact endpoints under CC BY 4.0. Source presence does not establish suitability or availability, and the model's equal 5,000-person capacities are kept as separate analytical assumptions. |
 | Espoo street-works or temporary-traffic-arrangement data | Actual works, closure windows, affected modes, and temporary routes | No suitable open operational feed is confirmed. A strict versioned GeoJSON contract exists, and exact user-clicked graph IDs can act as fixed closures, but imported matching and temporal analysis are not implemented. |
 
 The City of Espoo's
@@ -405,7 +486,7 @@ intervention that has not been independently assessed.
 - introduce a versioned scenario recipe and source-adapter contract;
 - separate generic graph, scenario, action, objective, and verification concepts
   from planter/portal vocabulary;
-- retain Four Planters unchanged as an end-to-end fixture;
+- retain the Kallio modal-filter experiment unchanged as an end-to-end fixture;
 - add source precedence, field lineage, and licence manifests.
 
 The typed recipe, adapter, metadata, and lineage seam is implemented. The first
@@ -474,10 +555,24 @@ does not yet contain time, flexible choices, mode-specific effects, baseline
 comparisons, or practitioner review, so it does not satisfy the research
 continuation criteria below.
 
-## Research continuation criteria
+### 6. Establish service coverage — first vertical slice complete
 
-The successor warrants continued study only if the pilot demonstrates more than a
-relabelled minimum cut. Before a research claim, require:
+- freeze official aggregate demand and reviewed public-facility evidence;
+- compile complete connector-inclusive walking distances and mapped routes;
+- let Z3 choose sites and whole-cell assignments under explicit hard constraints;
+- verify every assignment, distance, load, eligibility rule, and budget independently;
+- show a feasible optimum and distinct capacity and geographic infeasibility cases.
+
+The checked Otaniemi–Tapiola slice satisfies those items with 33 HSY cells, ten
+Service Map candidates and 330 connector-inclusive relations. Its default uses two sites under
+the at-most-four budget; budget one and a 1,000 m threshold expose different verified
+UNSAT explanations. The next slice should deepen the question rather than merely add
+more facilities.
+
+## Flood research continuation criteria
+
+The flood-resilient-access experiment warrants continued study only if the pilot
+demonstrates more than a relabelled minimum cut. Before a research claim, require:
 
 - at least one meaningful multi-scenario or temporal interaction;
 - a result that changes under a documented policy constraint, not an arbitrary UI
@@ -492,26 +587,49 @@ If suitable flood coverage, roadworks data, or defensible actions are unavailabl
 the project should report that limitation and stop rather than replace them with
 fabricated operational data.
 
+## Service-coverage continuation criteria
+
+The current result is a credible teaching example but warrants a wider research
+claim only after:
+
+- testing one shared site portfolio against multiple source-grounded network or
+  availability scenarios;
+- separating sourced facility properties from every declared suitability and
+  capacity assumption;
+- sensitivity analysis for grid inclusion, snapping, distance threshold and
+  whole-cell allocation;
+- explicit policy review before introducing demographic groups, district quotas,
+  or “equity” targets; and
+- comparison with facility-location/MIP or enumerative baselines, including cases
+  where Z3 adds no practical advantage.
+
 ## Immediate next tasks
 
-1. Find and freeze one documented works case with explicit mode, direction, and time
+1. Extend service coverage to **robust multi-scenario allocation**: keep
+   `open[site]` common while allowing `assign[cell,site,scenario]` to adapt under
+   normal, one-site-outage, and source-grounded flood/roadworks walking-network
+   scenarios. This is the laboratory's most valuable next extension because it
+   directly couples Experiments 02 and 03 and creates a portfolio choice that
+   independent nearest-site maps cannot answer.
+2. Find and freeze one documented works case with explicit mode, direction, and time
    semantics; match it to graph links with reviewable confidence.
-2. Add time buckets and let Z3 choose among genuinely flexible work windows while
-   requiring access in every enabled flood/work combination. This is the most
-   valuable next extension because it creates coupled choices beyond singleton cuts.
-3. Add purpose-reviewed destinations and sensitivity views for exit choice, origin
+3. Add time buckets and let Z3 choose among genuinely flexible work windows while
+   requiring access in every enabled flood/work combination.
+4. Add purpose-reviewed destinations and sensitivity views for exit choice, origin
    grid, study context, flood tier, and the exposure-as-unavailable rule.
-4. Inspect bridge/tunnel/layer cases and sample MML terrain only for reviewable
+5. Inspect bridge/tunnel/layer cases and sample MML terrain only for reviewable
    vertical/low-point QA, keeping Syke as the published hazard source and never
    deriving a home-made flood extent.
-5. Compare the resulting temporal model with shortest-path, minimum-cut, and an
-   appropriate scheduling baseline; report when Z3 adds value and when it does not.
-6. Complete custom-location promotion: acquire/validate every required source,
+6. Compare both the temporal-access and robust-allocation models with appropriate
+   routing, cut, enumeration, MIP, or facility-location baselines; report when Z3
+   adds value and when it does not.
+7. Complete custom-location promotion: acquire/validate every required source,
    review origins and exits, derive exposure, and select an immutable artifact before
    loading a new graph into the resilience runtime.
-7. Seek practitioner review before giving the experiment a planning-support product
+8. Seek practitioner review before giving the experiment a planning-support product
    identity.
 
-No application rename or destructive migration is required. The new experiment
-should earn its own product identity only after a real temporal works case,
-sensitivity evidence, and practitioner review.
+The neutral Geospatial Constraint Lab umbrella now avoids assigning any experiment
+the product's identity. Any future planning-support product identity should be earned
+only after a real temporal works case, sensitivity evidence, and practitioner review;
+no destructive migration of the frozen experiments is required.

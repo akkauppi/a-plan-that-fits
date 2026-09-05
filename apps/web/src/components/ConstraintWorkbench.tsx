@@ -108,7 +108,8 @@ const eventLabel = (event: ConstraintTraceEvent): string => {
   if (event.type.includes('candidate')) return 'Z3 proposed a set of contingency links.'
   if (event.type.includes('counterexample')) return 'NetworkX found an origin that still lacks access.'
   if (event.type === 'clause_added' || event.type === 'refining') return 'A graph-derived cut clause was added.'
-  if (event.type.includes('verified')) return 'The fresh graph check passed.'
+  if (event.type === 'verified_unsat') return 'The active hard constraints and sound graph-derived clauses admit no assignment.'
+  if (event.type.includes('verified')) return 'The feasible assignment passed a fresh graph check.'
   if (event.type.includes('unsat')) return 'No decision set satisfies the current hard constraints.'
   if (event.type === 'timeout') return 'The solve stopped at its time limit; this is not UNSAT.'
   if (event.type === 'error') return 'Verification stopped because of a data or processing error.'
@@ -269,7 +270,7 @@ export function ConstraintWorkbench({
 
           <div className="constraint-workbench__caution">
             <TriangleAlert size={17} aria-hidden="true" />
-            <p><strong>A true Boolean is an analytical assumption, not a field finding.</strong> <code>passable[c] = true</code> means the model may treat continuity zone <em>c</em> as passable under a stated contingency. Engineering, depth, velocity, legal and operational evidence must still justify that assumption.</p>
+            <p><strong>A true Boolean is an analytical assumption, not a field finding.</strong> <code>passable[c] = true</code> may return continuity zone <em>c</em> only when the encoded flood assumption removed it; fixed roadworks are excluded and cannot be reopened. Engineering, depth, velocity, legal and operational evidence must still justify that assumption.</p>
           </div>
         </>
       ) : (

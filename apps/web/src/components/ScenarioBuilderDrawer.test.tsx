@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ScenarioBuilderDrawer } from './ScenarioBuilderDrawer'
@@ -115,7 +116,113 @@ function json(value: unknown, status = 200): Response {
 
 afterEach(() => vi.unstubAllGlobals())
 
+function DrawerHarness() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Open network builder</button>
+      {open && <ScenarioBuilderDrawer onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
 describe('ScenarioBuilderDrawer', () => {
+  it('moves focus into the modal, contains Tab navigation, and restores the opener', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenario-builder/catalog')) return json(catalog)
+      if (url.endsWith('/scenario-builder/preflight')) return json(preflight())
+      throw new Error(`Unexpected request ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<DrawerHarness />)
+
+    const opener = screen.getByRole('button', { name: 'Open network builder' })
+    await user.click(opener)
+    const dialog = await screen.findByRole('dialog', { name: 'Choose the network' })
+    const title = within(dialog).getByRole('heading', { name: 'Choose the network' })
+    await waitFor(() => expect(title).toHaveFocus())
+
+    await user.tab()
+    const close = within(dialog).getByRole('button', { name: 'Close study-area builder' })
+    expect(close).toHaveFocus()
+
+    await screen.findByText('Source readiness')
+    const links = within(dialog).getAllByRole('link')
+    const lastLink = links.at(-1)
+    if (!lastLink) throw new Error('Expected a final attribution link')
+    lastLink.focus()
+    await user.tab()
+    expect(close).toHaveFocus()
+
+    await user.tab({ shift: true })
+    expect(lastLink).toHaveFocus()
+
+    await user.click(close)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
+  it('closes an idle drawer with Escape and restores focus', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenario-builder/catalog')) return json(catalog)
+      if (url.endsWith('/scenario-builder/preflight')) return json(preflight())
+      throw new Error(`Unexpected request ${url}`)
+    }))
+    render(<DrawerHarness />)
+
+    const opener = screen.getByRole('button', { name: 'Open network builder' })
+    await user.click(opener)
+    await screen.findByRole('dialog', { name: 'Choose the network' })
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
+  it('does not let Escape dismiss a drawer while a build is active', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const activeJob = {
+      job_id: 'job-active',
+      status: 'building',
+      created_at: '2026-08-30T12:00:00Z',
+      updated_at: '2026-08-30T12:00:01Z',
+      scenario_id: 'espoo-otaniemi-coastal-base-v1',
+      refresh: false,
+      result: null,
+      error: null,
+      events: [{
+        sequence: 1,
+        type: 'build_started',
+        message: 'Building directed graph.',
+        timestamp: '2026-08-30T12:00:01Z',
+        details: {},
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenario-builder/catalog')) return json(catalog)
+      if (url.endsWith('/scenario-builder/preflight')) return json(preflight())
+      if (url.endsWith('/scenario-builder/jobs')) return json(activeJob, 202)
+      if (url.endsWith('/scenario-builder/jobs/job-active')) return json(activeJob)
+      throw new Error(`Unexpected request ${url}`)
+    }))
+    render(<ScenarioBuilderDrawer onClose={onClose} />)
+
+    await screen.findByText('Source readiness')
+    await user.click(screen.getByRole('button', { name: /Rebuild from frozen archive/i }))
+    expect(await screen.findByRole('button', { name: /Cancel build/i })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Choose the network' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close study-area builder' })).toBeDisabled()
+  })
+
   it('opens on frozen Otaniemi and reports offline source readiness', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       void _init

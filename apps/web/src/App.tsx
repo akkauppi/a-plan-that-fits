@@ -25,12 +25,14 @@ import { ApiError, cancelSolve, getScenario, streamSolve } from './api'
 import { BudgetControl } from './components/BudgetControl'
 import { CandidateInspector } from './components/CandidateInspector'
 import { CompareDrawer } from './components/CompareDrawer'
+import { ExperimentIndex } from './components/ExperimentIndex'
 import { Legend } from './components/Legend'
 import { MapView } from './components/MapView'
 import { Methodology } from './components/Methodology'
 import { PortalPairs } from './components/PortalPairs'
 import { ResultPanel } from './components/ResultPanel'
 import { ResilienceExperiment } from './components/ResilienceExperiment'
+import { ServiceCoverageExperiment } from './components/ServiceCoverageExperiment'
 import { SolverTimeline } from './components/SolverTimeline'
 import { SolverComparisonPage } from './components/SolverComparisonPage'
 import type {
@@ -46,7 +48,7 @@ import type {
 } from './types'
 import { pairKey } from './types'
 import { statusFromResult } from './resultStatus'
-import { experienceFromUrl, replaceSettingsUrl, settingsFromUrl } from './urlState'
+import { experienceFromUrl, replaceSettingsUrl, settingsFromUrl, settingsToSearch } from './urlState'
 import type { Experience } from './urlState'
 
 const DEFAULT_SETTINGS: ScenarioSettings = {
@@ -63,6 +65,8 @@ const ACTIVE_STATUSES: SolveStatus[] = ['solving', 'candidate_found', 'counterex
 
 export function App() {
   const [activeExperience, setActiveExperience] = useState<Experience>(() => experienceFromUrl())
+  const [resilienceMounted, setResilienceMounted] = useState(() => experienceFromUrl() === 'resilience')
+  const [serviceCoverageMounted, setServiceCoverageMounted] = useState(() => experienceFromUrl() === 'coverage')
   const [showSolverGuide, setShowSolverGuide] = useState(false)
   const [scenario, setScenario] = useState<Scenario>()
   const [loadError, setLoadError] = useState<string>()
@@ -92,6 +96,10 @@ export function App() {
   const alternativeNoticeRef = useRef(false)
 
   useEffect(() => {
+    // Each experiment owns an independent frozen payload. Loading the sizeable
+    // Kallio graph while somebody is opening Otaniemi coverage wastes work and
+    // can contend with the allocation solver, so initialise it only on demand.
+    if (activeExperience !== 'baseline' || scenario) return
     const controller = new AbortController()
     setLoadError(undefined)
     getScenario(controller.signal)
@@ -108,10 +116,10 @@ export function App() {
         }
       })
     return () => controller.abort()
-  }, [reloadKey])
+  }, [activeExperience, reloadKey, scenario])
 
   useEffect(() => {
-    if (scenario) replaceSettingsUrl(settings, activeExperience)
+    if (scenario && activeExperience === 'baseline') replaceSettingsUrl(settings, activeExperience)
   }, [activeExperience, scenario, settings])
 
   const allPairs = useMemo(() => scenario ? portalPairsForScenario(scenario) : [], [scenario])
@@ -149,6 +157,70 @@ export function App() {
     verifiedResultRef.current = undefined
     terminalStatusRef.current = 'idle'
   }, [])
+
+  const navigateExperience = useCallback((next: Experience) => {
+    const url = new URL(window.location.href)
+    url.search = next === 'baseline' && !scenario
+      ? '?experience=baseline'
+      : settingsToSearch(settings, next)
+    window.history.pushState(null, '', url)
+    setShowSolverGuide(false)
+    setShowMethod(false)
+    setShowCompare(false)
+    if (next === 'resilience') setResilienceMounted(true)
+    if (next === 'coverage') setServiceCoverageMounted(true)
+    setActiveExperience(next)
+  }, [scenario, settings])
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const next = experienceFromUrl()
+      setShowSolverGuide(false)
+      if (next === 'resilience') setResilienceMounted(true)
+      if (next === 'coverage') setServiceCoverageMounted(true)
+      setActiveExperience(next)
+      if (next === 'baseline' && scenario) {
+        const defaults = scenario.default_portal_pairs.length
+          ? scenario.default_portal_pairs
+          : allPairs.slice(0, 2)
+        setSettings(settingsFromUrl({
+          ...DEFAULT_SETTINGS,
+          selectedPairKeys: defaults.map(pairKey),
+        }))
+        resetOutcome()
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [allPairs, resetOutcome, scenario])
+
+  useEffect(() => {
+    document.title = showSolverGuide
+      ? 'How the solvers work · Geospatial Constraint Lab'
+      : activeExperience === 'overview'
+        ? 'Geospatial Constraint Lab'
+        : activeExperience === 'resilience'
+          ? 'Resilient access · Geospatial Constraint Lab'
+          : activeExperience === 'coverage'
+            ? 'Equitable service coverage · Geospatial Constraint Lab'
+            : 'Four Planters · Geospatial Constraint Lab'
+    const frame = window.requestAnimationFrame(() => {
+      const selector = showSolverGuide
+        ? '.solver-guide [data-page-heading]'
+        : activeExperience === 'overview'
+          ? '.experiment-index [data-page-heading]'
+          : activeExperience === 'resilience'
+            ? '.resilience-experiment [data-page-heading], .resilience-loading [data-page-heading]'
+            : activeExperience === 'coverage'
+              ? '.service-coverage-experiment [data-page-heading], .service-coverage-loading [data-page-heading]'
+              : '.baseline-workspace [data-page-heading], .loading-screen [data-page-heading]'
+      document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true })
+      if ((activeExperience === 'resilience' || activeExperience === 'coverage') && !showSolverGuide) {
+        window.dispatchEvent(new Event('resize'))
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeExperience, showSolverGuide])
 
   const makeRequest = useCallback((next = false): SolveRequest | undefined => {
     if (!scenario) return undefined
@@ -295,6 +367,10 @@ export function App() {
     })
   }, [scenario?.snapshot_id])
 
+  useEffect(() => {
+    if (isSolving && (activeExperience !== 'baseline' || showSolverGuide)) cancel()
+  }, [activeExperience, cancel, isSolving, showSolverGuide])
+
   const reset = useCallback(() => {
     abortRef.current?.abort()
     resetOutcome()
@@ -329,36 +405,58 @@ export function App() {
   return (
     <div className={`app-shell app-shell--${activeExperience}`}>
       <header className="product-header">
-        <a className="brand" href="/" aria-label="Four Planters home">
-          <span className="brand-glyph" aria-hidden="true"><i /><i /><i /><i /></span>
+        <a
+          className="brand"
+          href="/"
+          aria-label="Geospatial Constraint Lab experiment index"
+          onClick={(event) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+            event.preventDefault()
+            navigateExperience('overview')
+          }}
+        >
+          <span className="lab-mark" aria-hidden="true"><Network size={18} /></span>
           <span>
-            <strong>Four Planters</strong>
-            <small>{showSolverGuide ? 'Solver guide' : activeExperience === 'resilience' ? 'Resilient access lab' : 'Modal-filter baseline'}</small>
+            <strong>Geospatial Constraint Lab</strong>
+            <small>{showSolverGuide ? 'Shared solver guide' : activeExperience === 'resilience' ? 'Experiment 02 · resilient access' : activeExperience === 'coverage' ? 'Experiment 03 · service allocation' : activeExperience === 'baseline' ? 'Experiment 01 · modal filters' : 'Experiment collection'}</small>
           </span>
         </a>
         <p>
           {showSolverGuide
-            ? 'Which engine should answer which question—and why does Four Planters use both?'
+            ? 'Which engine should answer which question—and why do these experiments use both?'
+            : activeExperience === 'overview'
+            ? 'Reproducible experiments in applying constraint solvers to geographic networks.'
             : activeExperience === 'resilience'
             ? 'Can selected address areas retain a private-car path to a designated network exit under explicit flood and roadworks assumptions?'
+            : activeExperience === 'coverage'
+            ? 'Which reviewed public facilities can serve every included population cell within explicit walking-distance and analytical-capacity limits?'
             : 'Can four small filters stop private-car through-routing while keeping every address connected?'}
         </p>
         <nav aria-label="Application information">
-          {activeExperience === 'resilience' ? (
+          {showSolverGuide ? (
+            <button type="button" onClick={() => setShowSolverGuide(false)}>
+              {activeExperience === 'overview' ? <MapPinned size={15} /> : <ArrowLeftRight size={15} />}
+              {activeExperience === 'overview' ? 'Experiments' : 'Live experiment'}
+            </button>
+          ) : activeExperience === 'overview' ? (
+            <button type="button" onClick={() => setShowSolverGuide(true)}>
+              <Network size={15} /> How solvers work
+            </button>
+          ) : activeExperience === 'resilience' || activeExperience === 'coverage' ? (
             <>
-              <button type="button" onClick={() => setShowSolverGuide((visible) => !visible)}>
-                {showSolverGuide ? <MapPinned size={15} /> : <Network size={15} />}
-                {showSolverGuide ? 'Live experiment' : 'How solvers differ'}
+              <button type="button" onClick={() => navigateExperience('overview')}>
+                <MapPinned size={15} /> Experiments
               </button>
-              <button type="button" onClick={() => { setShowSolverGuide(false); setActiveExperience('baseline') }}>
-                <Sprout size={15} /> Kallio baseline
+              <button type="button" onClick={() => setShowSolverGuide(true)}>
+                <Network size={15} /> How solvers work
               </button>
             </>
           ) : (
             <>
-              <button type="button" onClick={() => { setShowSolverGuide(false); setActiveExperience('resilience') }} disabled={isSolving}>
-                <MapPinned size={15} /> Otaniemi experiment
+              <button type="button" onClick={() => navigateExperience('overview')} disabled={isSolving}>
+                <MapPinned size={15} /> Experiments
               </button>
+              <button type="button" onClick={() => setShowSolverGuide(true)}><Network size={15} /> How solvers work</button>
               <button type="button" onClick={() => setShowMethod(true)}><BookOpenText size={15} /> Method</button>
               <button type="button" onClick={share}><Share2 size={15} /> {shareNotice ? 'Link copied' : 'Share'}</button>
             </>
@@ -366,19 +464,39 @@ export function App() {
         </nav>
       </header>
 
-      {showSolverGuide ? (
-        <SolverComparisonPage onClose={() => setShowSolverGuide(false)} />
-      ) : activeExperience === 'resilience' ? (
-        <ResilienceExperiment />
-      ) : !scenario ? (
+      {showSolverGuide && (
+        <SolverComparisonPage
+          onClose={() => setShowSolverGuide(false)}
+          returnLabel={activeExperience === 'overview' ? 'Return to all experiments' : 'Return to the live experiment'}
+        />
+      )}
+      {!showSolverGuide && activeExperience === 'overview' && (
+        <ExperimentIndex
+          onOpenModalFilters={() => navigateExperience('baseline')}
+          onOpenResilientAccess={() => navigateExperience('resilience')}
+          onOpenServiceCoverage={() => navigateExperience('coverage')}
+          onOpenSolverGuide={() => setShowSolverGuide(true)}
+        />
+      )}
+      {resilienceMounted && (
+        <div className="experience-host" hidden={showSolverGuide || activeExperience !== 'resilience'}>
+          <ResilienceExperiment active={activeExperience === 'resilience' && !showSolverGuide} />
+        </div>
+      )}
+      {serviceCoverageMounted && (
+        <div className="experience-host" hidden={showSolverGuide || activeExperience !== 'coverage'}>
+          <ServiceCoverageExperiment active={activeExperience === 'coverage' && !showSolverGuide} />
+        </div>
+      )}
+      {!showSolverGuide && activeExperience === 'baseline' && (!scenario ? (
         <LoadingScreen error={loadError} onRetry={() => setReloadKey((value) => value + 1)} />
       ) : (
       <main className="baseline-workspace">
         <aside className="instrument-panel" aria-label="Solver controls">
           <div className="panel-scroll">
             <section className="intro-block">
-              <div className="scenario-kicker"><span className="live-dot" />Frozen Helsinki scenario</div>
-              <h1>Close the shortcuts.<br />Keep the neighbourhood open.</h1>
+              <div className="scenario-kicker"><span className="live-dot" />Experiment 01 · frozen Kallio–Vallila</div>
+              <h1 data-page-heading tabIndex={-1}>Close the shortcuts.<br />Keep the neighbourhood open.</h1>
               <p>Place mode-specific filters on local streets, then prove which boundary routes they cut.</p>
             </section>
 
@@ -512,7 +630,7 @@ export function App() {
           )}
         </section>
       </main>
-      )}
+      ))}
 
       {showMethod && scenario && <><button className="sheet-backdrop" type="button" onClick={() => setShowMethod(false)} aria-label="Dismiss methods overlay" tabIndex={-1} /><Methodology scenario={scenario} onClose={() => setShowMethod(false)} /></>}
       {showCompare && scenario && (
@@ -537,19 +655,19 @@ export function App() {
 function LoadingScreen({ error, onRetry }: { error?: string; onRetry: () => void }) {
   return (
     <main className={`loading-screen ${error ? 'has-error' : ''}`}>
-      <span className="brand-glyph large" aria-hidden="true"><i /><i /><i /><i /></span>
+      <span className="lab-mark lab-mark--large" aria-hidden="true"><Network size={23} /></span>
       {error ? (
         <>
           <TriangleAlert size={24} />
-          <h1>Frozen scenario unavailable</h1>
+          <h1 data-page-heading tabIndex={-1}>Frozen scenario unavailable</h1>
           <p>{error} Start the solver service, then reconnect. No synthetic data has been substituted.</p>
           <button type="button" onClick={onRetry}>Retry connection</button>
         </>
       ) : (
         <>
           <LoaderCircle className="spin" size={22} />
-          <h1>Loading Four Planters</h1>
-          <p>Opening the frozen Helsinki street graph…</p>
+          <h1 data-page-heading tabIndex={-1}>Loading modal-filter placement</h1>
+          <p>Opening the frozen Kallio–Vallila street graph…</p>
         </>
       )}
     </main>
