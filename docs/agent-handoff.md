@@ -126,6 +126,17 @@ byte-identical to the source licence. Opening desktop/tablet screenshots were
 reviewed. These local checks are not a substitute for testing the deployed
 Pages site after publication.
 
+Live Pages verification on September 6, 2026: the initial
+[publication run](https://github.com/akkauppi/a-plan-that-fits/actions/runs/33982549181)
+succeeded for app commit `9c3d618`. A fresh desktop Chromium context on the
+public HTTPS URL confirmed project-scoped service-worker isolation, map and
+snapshot loading, the served MIT licence, a Z3-selected resilient plan with
+independently verified walks and four outage assignments, and the three-depot
+UNSAT case. No page errors or off-project runtime requests were observed.
+Opening, feasible-result and conflict screenshots were visually reviewed.
+This live smoke test supplements the full local/CI desktop and tablet suites;
+it does not extend browser-engine certification or establish learning benefits.
+
 Previous resilience checkpoint verification on September 5, 2026:
 `npm run check` passed strict types,
 byte-identical scenario regeneration, all six serialized Node test files and the
